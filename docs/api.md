@@ -14,6 +14,9 @@ the cross-cutting conventions.
   bug reports.
 - **Pagination**: list endpoints take `?limit=&cursor=` and return
   `{ items, nextCursor }` (cursor-based).
+- **Sorting**: `?sort=field` (or `-field` for descending), restricted to an
+  allow-list per endpoint.
+- **Filtering**: `?search=` for endpoint-specific free-text filtering.
 
 ## Endpoints (summary)
 

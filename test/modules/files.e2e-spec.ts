@@ -87,6 +87,29 @@ describeStorage('Files (e2e)', () => {
     expect(missing.status).toBe(404);
   });
 
+  it('filters the list by search (filename)', async () => {
+    const marker = randomUUID().slice(0, 8);
+    await request(server)
+      .post('/v1/files')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', Buffer.from('x'), { filename: `report-${marker}.txt` });
+    await request(server)
+      .post('/v1/files')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', Buffer.from('y'), { filename: 'unrelated.txt' });
+
+    const res = await request(server)
+      .get(`/v1/files?search=report-${marker}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(200);
+    const names = res.body.data.items.map(
+      (f: { filename: string }) => f.filename,
+    );
+    expect(names).toContain(`report-${marker}.txt`);
+    expect(names).not.toContain('unrelated.txt');
+  });
+
   it('rejects an unauthenticated upload', async () => {
     const res = await request(server)
       .post('/v1/files')

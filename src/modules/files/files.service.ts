@@ -1,13 +1,16 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { File } from '@prisma/client';
+import { File, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { Page, PaginationQuery } from '../../core/common/pagination';
+import { ListQuery, Page, parseSort } from '../../core/common/pagination';
 import {
   TENANT_PRISMA,
   TenantPrismaClient,
 } from '../../core/prisma/prisma.module';
 import { StorageService } from '../../integrations/storage/storage.service';
+
+// Fields callers may sort by; anything else falls back to the default.
+const SORTABLE_FIELDS = ['createdAt', 'filename', 'size'] as const;
 
 export interface UploadInput {
   originalname: string;
@@ -49,11 +52,20 @@ export class FilesService {
     });
   }
 
-  async list(query: PaginationQuery): Promise<Page<File>> {
-    // Fetch one extra row to tell whether a further page exists. UUIDv7 ids are
-    // time-ordered, so ordering by id desc is newest-first and stable.
+  async list(query: ListQuery): Promise<Page<File>> {
+    // Filtering (search by filename) and sorting are optional; the tenant filter
+    // is injected automatically by the tenant-scope extension.
+    const where: Prisma.FileWhereInput = query.search
+      ? { filename: { contains: query.search, mode: 'insensitive' } }
+      : {};
+
+    // Fetch one extra row to tell whether a further page exists.
     const rows = await this.prisma.file.findMany({
-      orderBy: { id: 'desc' },
+      where,
+      orderBy: parseSort(query.sort, SORTABLE_FIELDS, {
+        field: 'createdAt',
+        order: 'desc',
+      }),
       take: query.limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
     });

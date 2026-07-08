@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
-import { Page, PaginationQuery } from '../../core/common/pagination';
+import { ListQuery, Page } from '../../core/common/pagination';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -54,7 +54,7 @@ export class FilesController {
   }
 
   @Get()
-  async list(@Query() query: PaginationQuery): Promise<Page<FileResponse>> {
+  async list(@Query() query: ListQuery): Promise<Page<FileResponse>> {
     const page = await this.files.list(query);
     return {
       items: page.items.map((file) => FileResponse.from(file)),

@@ -1,0 +1,156 @@
+// Prisma schema.
+//
+// The identity model is deliberately split into three tables so today's simple
+// "one account = one tenant" shape can grow into "one company, many accounts"
+// later without a data rewrite:
+//
+//   Tenant  — the customer boundary. All business data hangs off this, so
+//             re-pointing it at more accounts later is additive, not a rebuild.
+//   User    — a person / login identity, belonging to exactly one tenant today.
+//   LoginMethod — how a user proves who they are (password, Google). One user
+//             can have several, so adding a login method never touches User.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Supported ways to authenticate. New providers (e.g. Microsoft) are added
+// here without schema changes elsewhere.
+enum LoginProvider {
+  PASSWORD
+  GOOGLE
+}
+
+model Tenant {
+  id   String  @id @default(uuid(7)) @db.Uuid
+  // Display name for the workspace. Optional while a tenant maps 1:1 to a
+  // single self-service account.
+  name String?
+
+  users User[]
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  // Soft delete: hides the tenant without destroying history. Irreversible
+  // erasure is handled separately for privacy requests.
+  deletedAt DateTime? @db.Timestamptz(6)
+
+  @@map("tenants")
+}
+
+model User {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Normalised to lowercase before persisting. Globally unique because the same
+  // email is treated as the same person regardless of how they sign in.
+  email       String  @unique
+  displayName String?
+
+  // Brute-force protection: consecutive failed password logins, and the time
+  // until which the account is locked after too many.
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime? @db.Timestamptz(6)
+
+  loginMethods  LoginMethod[]
+  refreshTokens RefreshToken[]
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  // Soft delete by default; personal data still supports hard deletion to meet
+  // AU/NZ privacy obligations.
+  deletedAt DateTime? @db.Timestamptz(6)
+
+  // Every tenant-scoped lookup filters on tenantId first, so lead the index
+  // with it. Cheap now, painful to add once the table is large.
+  @@index([tenantId, createdAt])
+  @@map("users")
+}
+
+model LoginMethod {
+  id     String @id @default(uuid(7)) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  provider LoginProvider
+
+  // Set only for PASSWORD. Stored as a hash — never a plaintext password.
+  passwordHash String?
+  // Set only for external providers: the provider's stable user id (e.g.
+  // Google's `sub`). Lets us recognise a returning user.
+  providerAccountId String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  // A user has at most one method per provider (one password, one Google link).
+  @@unique([userId, provider])
+  // An external identity maps to exactly one user, so nobody can hijack an
+  // account by linking a Google id that already belongs to someone else.
+  @@unique([provider, providerAccountId])
+  @@map("login_methods")
+}
+
+// Metadata for an uploaded object. The bytes live in S3-compatible storage
+// (MinIO / R2) under `key`; this row is the tenant-scoped index into it.
+model File {
+  id           String  @id @default(uuid(7)) @db.Uuid
+  tenantId     String  @db.Uuid
+  uploadedById String? @db.Uuid
+
+  key         String @unique // object key in the bucket
+  filename    String
+  contentType String
+  size        Int
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([tenantId, createdAt])
+  @@map("files")
+}
+
+// Append-only record of security- and account-relevant actions: who did what,
+// in which tenant, when. Deliberately has no foreign keys — audit history must
+// survive hard-deletion of the user or tenant it refers to, and a single table
+// records actions against many entity types.
+model AuditLog {
+  id          String  @id @default(uuid(7)) @db.Uuid
+  tenantId    String? @db.Uuid // tenant the action occurred in (null for pre-auth events)
+  actorUserId String? @db.Uuid // who performed it (null for system/anonymous)
+
+  action     String // e.g. "auth.login", "user.updated", "user.deleted"
+  targetType String? // e.g. "user"
+  targetId   String? @db.Uuid
+  metadata   Json? // extra, non-sensitive context
+  ip         String?
+  requestId  String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([tenantId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("audit_logs")
+}
+
+// A long-lived, revocable credential used to mint fresh access tokens. We store
+// only a hash of the opaque token, so a database leak can't be replayed. Tokens
+// rotate on every use and are revoked on logout.
+model RefreshToken {
+  id     String @id @default(uuid(7)) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(6)
+  revokedAt DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}

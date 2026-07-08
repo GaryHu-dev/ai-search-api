@@ -1,0 +1,19 @@
+# pnpm project settings (pnpm 11 reads these here rather than from .npmrc).
+
+# Only these packages may run install/postinstall build scripts. Prisma needs
+# to position its query engine; Scarf is analytics we don't want to run.
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  prisma: true
+  '@scarf/scarf': false
+  protobufjs: false
+
+# Force the patched multer (>=2.2.0) in place of the vulnerable 1.x that
+# @nestjs/platform-express pulls in (GHSA-72gw-mp4g-v24j, DoS).
+overrides:
+  multer: '>=2.2.0'
+
+# Don't re-run `pnpm install` before every script — we manage installs
+# explicitly, and the implicit check breaks tools that shell out to pnpm.
+verifyDepsBeforeRun: false

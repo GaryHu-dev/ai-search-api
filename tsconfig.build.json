@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  // Exclude prisma/ so the seed script (run via ts-node, not compiled here)
+  // doesn't widen the inferred rootDir and push output to dist/src/.
+  "exclude": ["node_modules", "test", "dist", "prisma", "**/*spec.ts"]
+}

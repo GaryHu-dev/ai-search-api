@@ -1,15 +1,17 @@
 # syntax=docker/dockerfile:1
 
-# Build stage: install everything, generate the Prisma client, compile to dist/.
+# Build stage: install everything, generate the Prisma client, compile to dist/,
+# then drop dev dependencies so only production packages (plus the generated
+# Prisma client) remain for the runtime image.
 FROM node:24-alpine AS build
 RUN corepack enable
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm prisma generate && pnpm build
+RUN pnpm prisma generate && pnpm build && pnpm prune --prod
 
 # Runtime stage: ship only what the process needs to boot.
 FROM node:24-alpine AS runner

@@ -19,7 +19,32 @@ pnpm start:dev
    (`node dist/main.js`) — the suites don't run `main.ts`.
 5. Open a PR into `dev`.
 
-A pre-commit hook (husky + lint-staged) lints and formats staged files.
+A pre-commit hook (husky + lint-staged) lints and formats staged files, and a
+commit-msg hook enforces Conventional Commits.
+
+## Branch protection (keep `main` green)
+
+Never push directly to `main`. All work lands via PR, and `main` requires the CI
+checks to pass before merge — so a CI failure only ever affects a feature branch
+or PR, never `main`.
+
+Recommended GitHub settings (Settings → Branches → protect `main`):
+
+- Require a pull request before merging.
+- Require status checks to pass: `verify`, `image-scan`, `analyze` (CodeQL).
+- Require branches to be up to date before merging (or use a merge queue).
+
+Workflow-file changes (`.github/`) can only be fully validated by the runner, so
+iterate on them **on a branch/PR**, not on `main`. Dependabot keeps action and
+dependency versions current, which prevents "action version no longer exists"
+breakages.
+
+## Running CI locally
+
+`pnpm ci:local` runs the same command steps as the CI `verify` job against the
+local services — catches lint/typecheck/build/migration/test failures before you
+push. It does **not** reproduce action-level issues (versions, runner setup);
+for those use [`act`](https://github.com/nektos/act) or a branch push.
 
 ## Definition of done
 

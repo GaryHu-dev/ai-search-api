@@ -80,8 +80,9 @@ Full docs live in [`docs/`](docs/):
 
 - [Architecture](docs/architecture.md) · [Security](docs/security.md) ·
   [Database](docs/database.md) · [Deployment](docs/deployment.md)
-- [API conventions](docs/api.md) · [Coding style](docs/coding-style.md) ·
-  [Contributing](docs/contributing.md) · [Troubleshooting](docs/troubleshooting.md)
+- [API conventions](docs/api.md) · [Frontend integration](docs/frontend-integration.md) ·
+  [Coding style](docs/coding-style.md) · [Contributing](docs/contributing.md) ·
+  [Troubleshooting](docs/troubleshooting.md)
 - [Architecture Decision Records](docs/adr/README.md) — the *why* behind the
   key choices.
 

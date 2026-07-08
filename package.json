@@ -18,10 +18,12 @@
     "lint:check": "eslint \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "ci:local": "bash scripts/ci-local.sh",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "services:up": "docker compose up -d",
@@ -30,7 +32,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "db:seed": "prisma db seed",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "prisma": {
     "seed": "node -r ts-node/register prisma/seed.ts"

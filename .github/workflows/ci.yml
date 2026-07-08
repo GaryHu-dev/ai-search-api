@@ -39,9 +39,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Version comes from package.json's "packageManager" field; specifying it
+      # here too would conflict (ERR_PNPM_BAD_PM_VERSION).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v4
         with:
@@ -60,6 +60,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint:check
+
+      - name: Format check
+        run: pnpm format:check
 
       - name: Typecheck
         run: pnpm typecheck
@@ -86,8 +89,11 @@ jobs:
         run: pnpm test:e2e
 
   # Builds the production image and scans it for OS/library vulnerabilities.
+  # Only on PRs and main pushes — the image build is slow and not worth running
+  # on every dev push.
   image-scan:
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -95,7 +101,7 @@ jobs:
         run: docker build -t saas-api:ci .
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: saas-api:ci
           severity: HIGH,CRITICAL

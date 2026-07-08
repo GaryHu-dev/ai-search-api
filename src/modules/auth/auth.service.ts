@@ -82,9 +82,12 @@ export class AuthService {
         })
       : null;
 
+    // When the account or its password method is missing, still spend argon2
+    // time on a dummy verify so response timing doesn't reveal which emails
+    // exist.
     const passwordOk = method?.passwordHash
       ? await this.passwords.verify(method.passwordHash, dto.password)
-      : false;
+      : await this.passwords.verifyDummy(dto.password);
 
     if (!user || !passwordOk) {
       if (user) {
@@ -94,6 +97,8 @@ export class AuthService {
       // endpoint can't be used to discover which emails are registered.
       throw new UnauthorizedException('Invalid email or password');
     }
+
+    await this.assertTenantActive(user.tenantId);
 
     // A successful login clears any accumulated failures and lock.
     if (user.failedLoginAttempts > 0 || user.lockedUntil) {
@@ -115,10 +120,17 @@ export class AuthService {
 
   // Counts a failed attempt and locks the account once the threshold is hit.
   private async registerFailedLogin(user: User): Promise<void> {
-    const attempts = user.failedLoginAttempts + 1;
     const max = this.config.get('LOGIN_MAX_ATTEMPTS', { infer: true });
 
-    if (attempts >= max) {
+    // Atomic increment so concurrent wrong-password attempts each count (a plain
+    // read-then-write would let them all overwrite the same value).
+    const { failedLoginAttempts } = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: { increment: 1 } },
+      select: { failedLoginAttempts: true },
+    });
+
+    if (failedLoginAttempts >= max) {
       const minutes = this.config.get('LOGIN_LOCK_MINUTES', { infer: true });
       await this.prisma.user.update({
         where: { id: user.id },
@@ -134,11 +146,17 @@ export class AuthService {
         targetType: 'user',
         targetId: user.id,
       });
-    } else {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { failedLoginAttempts: attempts },
-      });
+    }
+  }
+
+  // Rejects authentication for a soft-deleted tenant, so deactivating a
+  // workspace actually revokes its users' access rather than only hiding data.
+  private async assertTenantActive(tenantId: string): Promise<void> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant || tenant.deletedAt) {
+      throw new UnauthorizedException('This workspace is no longer active');
     }
   }
 
@@ -153,14 +171,44 @@ export class AuthService {
   async loginWithGoogle(idToken: string): Promise<AuthTokens> {
     const profile = await this.google.verify(idToken);
     const email = normaliseEmail(profile.email);
-    const existing = await this.users.findByEmail(email);
 
+    // Resolve by the stable Google account id (`sub`) first: a user's Google
+    // email can change, but the sub doesn't. Matching on email would fail to
+    // recognise a returning user whose email changed — and then try to create a
+    // duplicate Google identity. Email is only a fallback, for linking.
+    const linked = await this.prisma.loginMethod.findUnique({
+      where: {
+        provider_providerAccountId: {
+          provider: 'GOOGLE',
+          providerAccountId: profile.sub,
+        },
+      },
+      include: { user: true },
+    });
+
+    if (linked) {
+      if (linked.user.deletedAt) {
+        throw new UnauthorizedException('This account is no longer active');
+      }
+      await this.assertTenantActive(linked.user.tenantId);
+      await this.audit.record({
+        action: 'auth.login',
+        tenantId: linked.user.tenantId,
+        actorUserId: linked.user.id,
+        targetType: 'user',
+        targetId: linked.user.id,
+        metadata: { method: 'google' },
+      });
+      return this.tokens.issue(linked.user);
+    }
+
+    const existing = await this.users.findByEmail(email);
     if (existing?.deletedAt) {
       throw new UnauthorizedException('This account is no longer active');
     }
 
-    // Same email = same person: reuse the existing account, or create a fresh
-    // one for a first-time Google user.
+    // First-time Google user, or an existing account (e.g. password) signing in
+    // with Google for the first time.
     const user =
       existing ??
       (await this.prisma.$transaction(async (tx) => {
@@ -178,9 +226,9 @@ export class AuthService {
         return created;
       }));
 
-    // If they already had an account (e.g. registered with a password first),
-    // link this Google identity to it so future Google logins recognise them.
     if (existing) {
+      await this.assertTenantActive(user.tenantId);
+      // Link this Google identity onto the existing account.
       await this.prisma.loginMethod.upsert({
         where: { userId_provider: { userId: user.id, provider: 'GOOGLE' } },
         create: {

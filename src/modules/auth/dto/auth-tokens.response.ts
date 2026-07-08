@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-// Documents the token payload returned by the auth endpoints (for Swagger).
+// Swagger needs a concrete class to document the response shape; the value
+// returned at runtime is the AuthTokens interface.
 export class AuthTokensResponse {
   @ApiProperty()
   accessToken!: string;

@@ -36,8 +36,9 @@ model Tenant {
 
   createdAt DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @db.Timestamptz(6)
-  // Soft delete: hides the tenant without destroying history. Irreversible
-  // erasure is handled separately for privacy requests.
+  // Soft delete: hides the tenant without destroying history. Cascade FKs make
+  // an irreversible privacy erasure possible, but that's a manual/DB-level op
+  // today — there's no erasure endpoint yet.
   deletedAt DateTime? @db.Timestamptz(6)
 
   @@map("tenants")
@@ -63,8 +64,8 @@ model User {
 
   createdAt DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @db.Timestamptz(6)
-  // Soft delete by default; personal data still supports hard deletion to meet
-  // AU/NZ privacy obligations.
+  // Soft delete by default. Cascade FKs make a hard privacy erasure possible
+  // (AU/NZ obligations), though no erasure endpoint exists yet.
   deletedAt DateTime? @db.Timestamptz(6)
 
   // Every tenant-scoped lookup filters on tenantId first, so lead the index

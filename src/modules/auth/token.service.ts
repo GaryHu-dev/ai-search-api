@@ -51,7 +51,7 @@ export class TokenService {
     const tokenHash = this.hashToken(presented);
     const record = await this.prisma.refreshToken.findUnique({
       where: { tokenHash },
-      include: { user: true },
+      include: { user: { include: { tenant: true } } },
     });
 
     if (!record || record.expiresAt < new Date()) {
@@ -61,14 +61,21 @@ export class TokenService {
       await this.revokeAllForUser(record.userId);
       throw new UnauthorizedException('Invalid refresh token');
     }
-    if (record.user.deletedAt) {
+    if (record.user.deletedAt || record.user.tenant.deletedAt) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    await this.prisma.refreshToken.update({
-      where: { id: record.id },
+    // Atomically claim the token — only the request that flips revokedAt from
+    // null proceeds. This keeps rotation single-use under concurrent
+    // presentations: a benign client retry can't mint two token families or
+    // trip reuse-detection into revoking the whole family.
+    const { count } = await this.prisma.refreshToken.updateMany({
+      where: { id: record.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    if (count === 0) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
     return this.issue({
       id: record.user.id,

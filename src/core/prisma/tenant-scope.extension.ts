@@ -8,8 +8,6 @@ import { TenantContext } from '../tenancy/tenant-context';
 const TENANT_MODELS = new Set<string>(['File']);
 
 // Operations that accept a `where` we can constrain to the current tenant.
-// findUnique* are intentionally excluded — they key on unique fields only, so
-// callers use findFirst for tenant-scoped lookups.
 const WHERE_OPERATIONS = new Set<string>([
   'findFirst',
   'findFirstOrThrow',
@@ -21,6 +19,14 @@ const WHERE_OPERATIONS = new Set<string>([
   'updateMany',
   'delete',
   'deleteMany',
+]);
+
+// findUnique* key on unique fields only and can't be constrained by tenant, so
+// they'd bypass isolation. The extension refuses them on tenant models — callers
+// use findFirst instead.
+const UNSCOPABLE_OPERATIONS = new Set<string>([
+  'findUnique',
+  'findUniqueOrThrow',
 ]);
 
 // Pure, testable core: returns a copy of `args` constrained to `tenantId` for
@@ -46,18 +52,31 @@ export function scopeArgs(operation: string, args: any, tenantId: string): any {
 }
 
 // Automatically scopes queries on tenant-owned models to the current tenant
-// (from TenantContext). With no tenant in context (background jobs, pre-auth),
-// it does nothing — deliberate cross-tenant/system access stays explicit. A
-// database-level policy (Postgres RLS) is the intended fail-closed backstop.
+// (from TenantContext). It fails CLOSED: a tenant model reached with no tenant
+// in context — a missing guard, the wrong Prisma client, or a job that forgot
+// TenantContext.run — throws rather than silently returning every tenant's rows.
+// Non-tenant models (and clients used pre-auth) pass through untouched.
 export const tenantScopeExtension = Prisma.defineExtension({
   name: 'tenant-scope',
   query: {
     $allModels: {
       $allOperations({ model, operation, args, query }) {
-        const tenantId = TenantContext.getTenantId();
-        if (!model || !TENANT_MODELS.has(model) || !tenantId) {
+        if (!model || !TENANT_MODELS.has(model)) {
           return query(args);
         }
+
+        const tenantId = TenantContext.getTenantId();
+        if (!tenantId) {
+          throw new Error(
+            `Tenant context is required to access ${model} through the tenant-scoped client`,
+          );
+        }
+        if (UNSCOPABLE_OPERATIONS.has(operation)) {
+          throw new Error(
+            `${operation} bypasses tenant scoping on ${model}; use findFirst instead`,
+          );
+        }
+
         return query(scopeArgs(operation, args, tenantId));
       },
     },

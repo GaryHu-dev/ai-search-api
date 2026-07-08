@@ -1,14 +1,13 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { JobsService } from './jobs.service';
 
 const QUEUE = 'refresh-tokens.purge';
 
 // Housekeeping: refresh tokens accumulate as users log in and out. Expired ones,
-// and revoked ones past a short grace window, serve no purpose and are removed
-// on a daily schedule. A real, useful first job — not a demo.
+// and revoked ones past a short grace window, are removed on a daily schedule.
 @Injectable()
-export class RefreshTokenCleanupJob implements OnModuleInit {
+export class RefreshTokenCleanupJob implements OnApplicationBootstrap {
   private readonly logger = new Logger(RefreshTokenCleanupJob.name);
 
   constructor(
@@ -16,7 +15,11 @@ export class RefreshTokenCleanupJob implements OnModuleInit {
     private readonly prisma: PrismaService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  // Register the queue on application bootstrap, not module init: Nest runs a
+  // module's onModuleInit hooks in parallel (Promise.all), so this would
+  // otherwise race JobsService starting pg-boss and creating its schema.
+  // onApplicationBootstrap runs only after every onModuleInit has resolved.
+  async onApplicationBootstrap(): Promise<void> {
     const boss = this.jobs.client;
     await boss.createQueue(QUEUE);
     await boss.work(QUEUE, () => this.purgeStale());

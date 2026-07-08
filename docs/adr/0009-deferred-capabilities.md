@@ -20,7 +20,9 @@ requires reworking what exists.
 | Idempotency keys / webhooks / usage metering | A public write API, outbound webhooks, or metered billing exists. |
 | Redis cache | A measured hot path needs it, or the throttler/sessions must be shared across replicas. |
 | Secrets manager | Deploying somewhere with a real secret store (env files are dev-only). |
-| Postgres RLS (database-level tenant enforcement) | A fail-closed backstop beneath the app-level auto-scoping ([0002](0002-multi-tenancy.md)); add before the data is high-value/regulated. |
+| Postgres RLS (database-level tenant enforcement) | A database-level backstop beneath the app-level auto-scoping, which already fails closed ([0002](0002-multi-tenancy.md)); add before the data is high-value/regulated. |
+| Personal-data erasure endpoint | A verified erasure request must be self-served or automated. The data model already cascades ([0004](0004-soft-delete-privacy.md)); today erasure is manual/DB-level. |
+| SAST (CodeQL) + container image scanning in CI | Before a production launch or handling regulated data — removed from CI meanwhile to keep it lean and fast. |
 
 ## Consequences
 

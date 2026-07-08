@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 #
-# Mirrors the GitHub Actions "verify" job locally, so most CI failures are
-# caught before pushing. It runs the same command steps against the local
-# services.
-#
-# It does NOT reproduce action-resolution issues (action versions, runner
-# setup) — those still need `act` or a push on a branch. See docs/contributing.md.
+# Runs the full local check suite before you push: lint, format, typecheck,
+# audit, build, migrations, and all tests against the local services. CI itself
+# is intentionally lean (just build + tests on a fresh database), so this script
+# is a superset — if it passes, CI will too.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."

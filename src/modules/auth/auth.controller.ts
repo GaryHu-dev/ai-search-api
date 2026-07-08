@@ -43,6 +43,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(200)
+  @Throttle(CREDENTIAL_THROTTLE)
   @ApiOkResponse({ type: AuthTokensResponse })
   refresh(@Body() dto: RefreshTokenDto): Promise<AuthTokens> {
     return this.auth.refresh(dto.refreshToken);
@@ -50,6 +51,7 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(204)
+  @Throttle(CREDENTIAL_THROTTLE)
   async logout(@Body() dto: RefreshTokenDto): Promise<void> {
     await this.auth.logout(dto.refreshToken);
   }

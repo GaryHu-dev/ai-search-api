@@ -9,12 +9,17 @@ import { TokenService } from './token.service';
 
 describe('AuthService', () => {
   const users = { findByEmail: jest.fn(), createUserWithTenant: jest.fn() };
-  const passwords = { hash: jest.fn(), verify: jest.fn() };
+  const passwords = {
+    hash: jest.fn(),
+    verify: jest.fn(),
+    verifyDummy: jest.fn(),
+  };
   const tokens = { issue: jest.fn() };
   const prisma = {
     $transaction: jest.fn(),
     loginMethod: { findUnique: jest.fn(), upsert: jest.fn() },
     user: { update: jest.fn() },
+    tenant: { findUnique: jest.fn() },
   };
   const google = { verify: jest.fn() };
   const audit = { record: jest.fn() };
@@ -95,6 +100,7 @@ describe('AuthService', () => {
         passwordHash: 'hashed',
       });
       passwords.verify.mockResolvedValue(false);
+      prisma.user.update.mockResolvedValue({ failedLoginAttempts: 1 });
 
       await expect(
         service.login({ email: 'jane@example.com', password: 'wrong' }),
@@ -102,7 +108,8 @@ describe('AuthService', () => {
       expect(tokens.issue).not.toHaveBeenCalled();
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
-        data: { failedLoginAttempts: 1 },
+        data: { failedLoginAttempts: { increment: 1 } },
+        select: { failedLoginAttempts: true },
       });
     });
 
@@ -118,6 +125,8 @@ describe('AuthService', () => {
         passwordHash: 'hashed',
       });
       passwords.verify.mockResolvedValue(false);
+      // Atomic increment returns the new count; 5 hits the max and triggers a lock.
+      prisma.user.update.mockResolvedValue({ failedLoginAttempts: 5 });
 
       await expect(
         service.login({ email: 'jane@example.com', password: 'wrong' }),
@@ -161,6 +170,7 @@ describe('AuthService', () => {
         passwordHash: 'hashed',
       });
       passwords.verify.mockResolvedValue(true);
+      prisma.tenant.findUnique.mockResolvedValue({ id: 't1', deletedAt: null });
       tokens.issue.mockResolvedValue({ accessToken: 'a' });
 
       await service.login({
@@ -180,6 +190,7 @@ describe('AuthService', () => {
         name: 'New',
       });
       users.findByEmail.mockResolvedValue(null);
+      prisma.loginMethod.findUnique.mockResolvedValue(null);
       prisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
         fn({ loginMethod: { create: jest.fn().mockResolvedValue({}) } }),
       );
@@ -207,6 +218,8 @@ describe('AuthService', () => {
         email: 'jane@example.com',
         deletedAt: null,
       });
+      prisma.loginMethod.findUnique.mockResolvedValue(null);
+      prisma.tenant.findUnique.mockResolvedValue({ id: 't1', deletedAt: null });
       prisma.loginMethod.upsert.mockResolvedValue({});
       tokens.issue.mockResolvedValue({ accessToken: 'a' });
 
@@ -224,6 +237,7 @@ describe('AuthService', () => {
         email: 'gone@example.com',
         sub: 'g-1',
       });
+      prisma.loginMethod.findUnique.mockResolvedValue(null);
       users.findByEmail.mockResolvedValue({ id: 'u1', deletedAt: new Date() });
 
       await expect(service.loginWithGoogle('id-token')).rejects.toBeInstanceOf(

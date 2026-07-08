@@ -18,6 +18,9 @@ export class TenantContextInterceptor implements NestInterceptor {
       .switchToHttp()
       .getRequest<{ user?: { tenantId?: string } }>();
 
+    // enterWith, not run(): the binding must outlive this synchronous call and
+    // stay in scope while the returned observable is subscribed and the handler
+    // runs. run()'s scope would end the moment this method returns.
     const tenantId = request.user?.tenantId;
     if (tenantId) {
       TenantContext.enterWith(tenantId);

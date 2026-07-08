@@ -31,7 +31,7 @@ or PR, never `main`.
 Recommended GitHub settings (Settings → Branches → protect `main`):
 
 - Require a pull request before merging.
-- Require status checks to pass: `verify`, `image-scan`, `analyze` (CodeQL).
+- Require the `verify` status check to pass.
 - Require branches to be up to date before merging (or use a merge queue).
 
 Workflow-file changes (`.github/`) can only be fully validated by the runner, so
@@ -41,10 +41,9 @@ breakages.
 
 ## Running CI locally
 
-`pnpm ci:local` runs the same command steps as the CI `verify` job against the
-local services — catches lint/typecheck/build/migration/test failures before you
-push. It does **not** reproduce action-level issues (versions, runner setup);
-for those use [`act`](https://github.com/nektos/act) or a branch push.
+`pnpm ci:local` runs the full check suite (lint, format, typecheck, audit,
+build, migrations, tests) against the local services before you push — a
+superset of CI, so if it's green CI will be too.
 
 ## Definition of done
 
@@ -56,5 +55,9 @@ for those use [`act`](https://github.com/nektos/act) or a branch push.
 
 ## CI gates
 
-Install → audit → lint → typecheck → build → migrate + drift check → unit → e2e,
-plus CodeQL and a Trivy image scan.
+CI is intentionally minimal: a single `verify` job that installs, builds, and
+runs the tests against a **fresh** PostgreSQL — a clean database is what catches
+bugs a long-lived local one can hide (and did). Lint, format, typecheck, and
+audit run locally via the pre-commit hook and `pnpm ci:local`, not in CI.
+Security scanning (CodeQL, image scanning) is deferred until closer to
+production.

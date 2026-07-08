@@ -13,9 +13,11 @@ must be genuinely erasable to meet Australian (Privacy Act 1988) and New Zealand
 - Tenant/user rows carry a nullable `deletedAt` timestamp. Deleting sets it;
   it is not a physical delete.
 - Soft-deleted users cannot authenticate — both login and refresh reject them.
-- Personal data still supports **hard deletion / anonymisation** for verified
-  erasure requests. Cascade foreign keys make deleting a user or tenant remove
-  its dependent rows.
+- The **data model** supports hard deletion / anonymisation of personal data:
+  cascade foreign keys make deleting a user or tenant remove its dependent rows.
+  An erasure *endpoint* is not built yet
+  ([0009](0009-deferred-capabilities.md)); until then, a verified erasure request
+  is fulfilled by a manual/DB-level delete.
 - **Audit logs have no foreign keys** (`audit_logs`), so the "who did what"
   history survives even a hard delete of the subject.
 

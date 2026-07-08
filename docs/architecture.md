@@ -19,11 +19,13 @@ There is no repository layer — services use Prisma directly ([ADR-0001](adr/00
 1. **ThrottlerGuard** — global rate limit (tighter on credential routes).
 2. **JwtAuthGuard** (on protected routes) — validates the access token, sets
    `request.user = { userId, tenantId, email }`.
-3. **TimeoutInterceptor** — fails a handler that runs too long.
-4. **ValidationPipe** — validates and transforms the body against its DTO.
-5. **Controller → Service** — business logic; tenant-scoped queries.
-6. **ResponseEnvelopeInterceptor** — wraps success as `{ data, requestId }`.
-7. **AllExceptionsFilter** — renders any error as the error envelope.
+3. **TenantContextInterceptor** — binds `request.user.tenantId` to the async
+   context so the Prisma tenant-scope extension filters queries automatically.
+4. **TimeoutInterceptor** — fails a handler that runs too long.
+5. **ValidationPipe** — validates and transforms the body against its DTO.
+6. **Controller → Service** — business logic; tenant-scoped queries.
+7. **ResponseEnvelopeInterceptor** — wraps success as `{ data, requestId }`.
+8. **AllExceptionsFilter** — renders any error as the error envelope.
 
 Every request carries an `x-request-id`; it appears in logs, both envelopes, and
 (when OpenTelemetry is on) alongside a `trace_id`.

@@ -97,7 +97,7 @@ describe('TokenService', () => {
       userId: 'u1',
       expiresAt: new Date(Date.now() + 10_000),
       revokedAt: null,
-      user: { id: 'u1', deletedAt: new Date() },
+      user: { id: 'u1', deletedAt: new Date(), tenant: { deletedAt: null } },
     });
     await expect(service.rotate('valid')).rejects.toBeInstanceOf(
       UnauthorizedException,
@@ -115,21 +115,46 @@ describe('TokenService', () => {
         tenantId: 't1',
         email: 'jane@example.com',
         deletedAt: null,
+        tenant: { deletedAt: null },
       },
     });
-    prisma.refreshToken.update.mockResolvedValue({});
+    // The old token is claimed atomically; count === 1 means this call won.
+    prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
     prisma.refreshToken.create.mockResolvedValue({});
     jwt.signAsync.mockResolvedValue('new-access');
 
     const tokens = await service.rotate('valid');
 
-    expect(prisma.refreshToken.update).toHaveBeenCalledWith(
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'r1' },
+        where: { id: 'r1', revokedAt: null },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );
     expect(tokens.accessToken).toBe('new-access');
+  });
+
+  it('rejects rotation when the token was already claimed concurrently', async () => {
+    prisma.refreshToken.findUnique.mockResolvedValue({
+      id: 'r1',
+      userId: 'u1',
+      expiresAt: new Date(Date.now() + 10_000),
+      revokedAt: null,
+      user: {
+        id: 'u1',
+        tenantId: 't1',
+        email: 'jane@example.com',
+        deletedAt: null,
+        tenant: { deletedAt: null },
+      },
+    });
+    // A concurrent request already flipped revokedAt, so this claim matches no row.
+    prisma.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.rotate('valid')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(jwt.signAsync).not.toHaveBeenCalled();
   });
 
   it('revoke marks the presented token revoked', async () => {

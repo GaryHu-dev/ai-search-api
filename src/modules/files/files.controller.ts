@@ -16,6 +16,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { ListQuery, Page } from '../../core/common/pagination';
+import { attachmentDisposition } from '../../core/common/utils/content-disposition';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -69,7 +70,7 @@ export class FilesController {
     const { file, stream } = await this.files.download(id);
     return new StreamableFile(stream, {
       type: file.contentType,
-      disposition: `attachment; filename="${file.filename}"`,
+      disposition: attachmentDisposition(file.filename),
     });
   }
 

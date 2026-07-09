@@ -5,7 +5,7 @@ import { TenantContext } from '../tenancy/tenant-context';
 // Models whose rows belong to a tenant. Add a model here when it gains a
 // `tenantId` — this single list is the only thing to remember, instead of a
 // `where` clause on every query.
-const TENANT_MODELS = new Set<string>(['File']);
+const TENANT_MODELS = new Set<string>(['File', 'Audit']);
 
 // Operations that accept a `where` we can constrain to the current tenant.
 const WHERE_OPERATIONS = new Set<string>([

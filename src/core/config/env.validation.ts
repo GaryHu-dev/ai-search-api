@@ -24,6 +24,11 @@ const envSchema = z.object({
   // Comma-separated list of allowed CORS origins. Unset = reflect the request
   // origin (convenient in development; lock this down in production).
   CORS_ORIGINS: z.string().optional(),
+
+  // SSRF-guard override for the GEO audit fetcher: 'true' lets it fetch private
+  // / loopback URLs. Declared here (rather than read raw) so config validation
+  // doesn't strip it. Dev and tests only — never set in production.
+  GEO_ALLOW_PRIVATE_URLS: z.string().optional(),
   // Express `trust proxy`. MUST match the real deployment topology: behind
   // Cloudflare/a load balancer, set this (e.g. a hop count or trusted CIDRs) so
   // the real client IP drives rate-limiting and logging. Too trusting lets

@@ -12,6 +12,7 @@ import { JobsModule } from './core/jobs/jobs.module';
 import { AppLoggerModule } from './core/logger/logger.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { FilesModule } from './modules/files/files.module';
+import { GeoModule } from './modules/geo/geo.module';
 import { UsersModule } from './modules/users/users.module';
 import { PrismaModule } from './core/prisma/prisma.module';
 
@@ -32,6 +33,7 @@ import { PrismaModule } from './core/prisma/prisma.module';
     UsersModule,
     AuthModule,
     FilesModule,
+    GeoModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

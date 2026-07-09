@@ -132,6 +132,16 @@ Files (auth required):
 | GET | `/v1/files/{id}/download` | **raw binary** (Content-Disposition attachment); not enveloped. `{id}` must be a UUID — malformed → `400`, unknown → `404` |
 | DELETE | `/v1/files/{id}` | 204. `{id}` must be a UUID — malformed → `400`, unknown → `404` |
 
+GEO audits (auth required; **async** — the report is not instant):
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/v1/audits` | `{ url }` → `202` with an audit in `PENDING`. Runs in the background. |
+| GET | `/v1/audits/{id}` | **Poll** until `status` is `COMPLETED` or `FAILED`, then render `findings`. `{id}` must be a UUID. |
+| GET | `/v1/audits` | History — supports `limit`/`cursor`/`sort`/`search` like files. |
+
+Each finding: `{ dimension, title, status: 'ok' | 'needs_work', summary, detail, recommendation, basis, strength: 'hard' | 'advisory' }`. Poll roughly every 1–2s; a typical audit completes in a few seconds.
+
 Health (public, unversioned, raw shape): `GET /health/live`, `GET /health/ready`.
 
 ## 5. Pagination, sorting, filtering (list endpoints)

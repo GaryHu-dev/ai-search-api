@@ -17,6 +17,11 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # Only propose versions that have aged a week, so they clear pnpm's
+    # minimum-release-age supply-chain policy (a fresh release is refused by
+    # `pnpm install`). Keeps the two from fighting.
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types: ['minor', 'patch']

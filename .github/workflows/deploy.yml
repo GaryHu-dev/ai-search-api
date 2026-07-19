@@ -1,0 +1,104 @@
+name: Deploy
+
+# Fully CI-driven deploy. On push to main:
+#   1. build the backend image and push it to GHCR
+#   2. copy deploy/ (compose, Caddyfile, placeholder site) to the server
+#   3. SSH in: generate .env once, pull the new image, roll the stack
+# The server only needs Docker + the deploy public key in authorized_keys.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# Only one deploy at a time; a new push waits for the running deploy to finish
+# rather than racing it on the server.
+concurrency:
+  group: deploy-omniport
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/garyhu-dev/ai-search-api
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+      - name: Copy deploy config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "deploy/docker-compose.yml,deploy/Caddyfile"
+          target: "/opt/omniport"
+          strip_components: 1
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: R2_ENDPOINT,R2_BUCKET,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY
+          script: |
+            set -e
+            if ! command -v openssl >/dev/null; then apt-get update -qq && apt-get install -y -qq openssl; fi
+            cd /opt/omniport
+            # The web root is owned by the frontend repo (ai-search-web fills ./www);
+            # just ensure the dir exists for Caddy's bind mount.
+            mkdir -p www
+            if [ ! -f .env ]; then
+              DBPASS=$(openssl rand -hex 16)
+              JWT=$(openssl rand -base64 48 | tr -d '\n')
+              cat > .env <<EOF
+            NODE_ENV=production
+            PORT=3000
+            LOG_LEVEL=info
+            DATABASE_URL=postgresql://app:${DBPASS}@db:5432/app?schema=public
+            POSTGRES_PASSWORD=${DBPASS}
+            JWT_ACCESS_SECRET=${JWT}
+            JWT_ACCESS_TTL_SECONDS=900
+            REFRESH_TOKEN_TTL_DAYS=30
+            LOGIN_MAX_ATTEMPTS=5
+            LOGIN_LOCK_MINUTES=15
+            TRUST_PROXY=1
+            CORS_ORIGINS=https://omniport.online,https://www.omniport.online
+            STORAGE_ENDPOINT=${R2_ENDPOINT}
+            STORAGE_REGION=auto
+            STORAGE_BUCKET=${R2_BUCKET}
+            STORAGE_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+            STORAGE_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+            STORAGE_FORCE_PATH_STYLE=false
+            EOF
+            fi
+            docker compose pull
+            docker compose up -d
+            docker image prune -f

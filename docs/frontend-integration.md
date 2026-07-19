@@ -136,7 +136,7 @@ GEO audits (auth required; **async** — the report is not instant):
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/v1/audits` | `{ url }` → `202` with an audit in `PENDING`. Runs in the background. |
+| POST | `/v1/audits` | `{ url }` → `202` with an audit in `PENDING`. Runs in the background. Tighter rate limit than the global one — 20/min per IP, and max 5 in-flight audits per tenant; exceeding either → `429`. |
 | GET | `/v1/audits/{id}` | **Poll** until `status` is `COMPLETED` or `FAILED`, then render `findings`. `{id}` must be a UUID. |
 | GET | `/v1/audits` | History — supports `limit`/`cursor`/`sort`/`search` like files. |
 

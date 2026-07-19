@@ -8,16 +8,18 @@ describe('AuditsService', () => {
       findFirst: jest.fn(),
       findMany: jest.fn(),
       update: jest.fn(),
+      count: jest.fn(),
     },
   };
-  const send = jest.fn();
-  const jobs = { client: { send } };
+  const enqueue = jest.fn();
+  const jobs = { enqueue };
 
   const service = new AuditsService(prisma as never, jobs as never);
 
   beforeEach(() => jest.clearAllMocks());
 
   it('creates a PENDING audit and enqueues a job', async () => {
+    prisma.audit.count.mockResolvedValue(0);
     prisma.audit.create.mockResolvedValue({
       id: 'a1',
       tenantId: 't1',
@@ -29,22 +31,34 @@ describe('AuditsService', () => {
     expect(prisma.audit.create).toHaveBeenCalledWith({
       data: { url: 'https://x.com', requestedById: 'u1', tenantId: 't1' },
     });
-    expect(send).toHaveBeenCalledWith(GEO_AUDIT_QUEUE, {
-      auditId: 'a1',
-      tenantId: 't1',
-    });
+    expect(enqueue).toHaveBeenCalledWith(
+      GEO_AUDIT_QUEUE,
+      { auditId: 'a1', tenantId: 't1' },
+      expect.any(Object),
+    );
     expect(audit.id).toBe('a1');
   });
 
   it('marks the audit FAILED if enqueue throws (no PENDING orphan)', async () => {
+    prisma.audit.count.mockResolvedValue(0);
     prisma.audit.create.mockResolvedValue({ id: 'a1', tenantId: 't1' });
-    send.mockRejectedValue(new Error('queue down'));
+    enqueue.mockRejectedValue(new Error('queue down'));
 
     await expect(service.create('https://x.com', 'u1', 't1')).rejects.toThrow();
     expect(prisma.audit.update).toHaveBeenCalledWith({
       where: { id: 'a1' },
       data: { status: 'FAILED', error: 'Could not queue the audit' },
     });
+  });
+
+  it('rejects with 429 when the tenant has too many in-flight audits', async () => {
+    prisma.audit.count.mockResolvedValue(5);
+
+    await expect(
+      service.create('https://x.com', 'u1', 't1'),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(prisma.audit.create).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('throws NotFound when an audit is not in the tenant', async () => {

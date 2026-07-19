@@ -5,8 +5,10 @@ export const clientRenderingCheck: GeoCheck = {
   run(ctx: PageContext): Finding {
     const bodyText = ctx.$('body').text().replace(/\s+/g, ' ').trim();
     const scripts = ctx.$('script').length;
-    // Heuristic: very little server-rendered text but plenty of scripts => SPA shell.
-    const looksClientSide = bodyText.length < 200 && scripts >= 1;
+    // Flag either a near-empty page (nothing for engines to read at all) or the
+    // classic SPA shell (little server text, but scripts that would render it).
+    const looksClientSide =
+      bodyText.length < 30 || (bodyText.length < 200 && scripts >= 1);
 
     const base = {
       dimension: 'client-rendering',

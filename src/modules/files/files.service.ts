@@ -78,8 +78,16 @@ export class FilesService {
 
   async download(id: string): Promise<{ file: File; stream: Readable }> {
     const file = await this.getOwned(id);
-    const stream = await this.storage.get(file.key);
-    return { file, stream };
+    try {
+      const stream = await this.storage.get(file.key);
+      return { file, stream };
+    } catch (err) {
+      // Row exists but the object is gone (orphaned) — a 404 is truer than 500.
+      if (err instanceof Error && err.name === 'NoSuchKey') {
+        throw new NotFoundException('File content is no longer available');
+      }
+      throw err;
+    }
   }
 
   async remove(id: string): Promise<void> {

@@ -1,4 +1,10 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Audit } from '@prisma/client';
 import { ListQuery, Page, parseSort } from '../../core/common/pagination';
 import { JobsService } from '../../core/jobs/jobs.service';
@@ -9,6 +15,17 @@ import {
 import { GEO_AUDIT_QUEUE, GeoAuditJobData } from './geo.constants';
 
 const SORTABLE_FIELDS = ['createdAt', 'url', 'status'] as const;
+
+// Cap concurrent in-flight audits per tenant: each fans out to several outbound
+// fetches, so this blunts queue-flooding and outbound amplification.
+const MAX_INFLIGHT_PER_TENANT = 5;
+
+// List rows omit the (potentially large) findings JSON; full findings come from
+// findOne.
+export type AuditSummary = Pick<
+  Audit,
+  'id' | 'url' | 'status' | 'error' | 'createdAt'
+>;
 
 @Injectable()
 export class AuditsService {
@@ -25,6 +42,18 @@ export class AuditsService {
     requestedById: string,
     tenantId: string,
   ): Promise<Audit> {
+    // Tenant-scoped count (the extension injects tenantId): reject if too many
+    // are already queued/running for this tenant.
+    const inflight = await this.prisma.audit.count({
+      where: { status: { in: ['PENDING', 'PROCESSING'] } },
+    });
+    if (inflight >= MAX_INFLIGHT_PER_TENANT) {
+      throw new HttpException(
+        'Too many audits in progress; wait for some to finish',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const audit = await this.prisma.audit.create({
       data: { url, requestedById, tenantId },
     });
@@ -33,7 +62,11 @@ export class AuditsService {
       tenantId: audit.tenantId,
     };
     try {
-      await this.jobs.client.send(GEO_AUDIT_QUEUE, payload);
+      // A slow audit shouldn't be reclaimed mid-run; the reaper handles crashes.
+      await this.jobs.enqueue(GEO_AUDIT_QUEUE, payload, {
+        expireInSeconds: 300,
+        retryLimit: 0,
+      });
     } catch (err) {
       // Don't leave a PENDING orphan that no worker will ever pick up.
       await this.prisma.audit.update({
@@ -51,12 +84,19 @@ export class AuditsService {
     return audit;
   }
 
-  async list(query: ListQuery): Promise<Page<Audit>> {
+  async list(query: ListQuery): Promise<Page<AuditSummary>> {
     const where = query.search
       ? { url: { contains: query.search, mode: 'insensitive' as const } }
       : {};
     const rows = await this.prisma.audit.findMany({
       where,
+      select: {
+        id: true,
+        url: true,
+        status: true,
+        error: true,
+        createdAt: true,
+      },
       orderBy: parseSort(query.sort, SORTABLE_FIELDS, {
         field: 'createdAt',
         order: 'desc',

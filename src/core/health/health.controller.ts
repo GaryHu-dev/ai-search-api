@@ -3,6 +3,7 @@ import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
 import { ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { SkipResponseEnvelope } from '../common/decorators/skip-response-envelope.decorator';
+import { JobsHealthIndicator } from './jobs.health';
 import { PrismaHealthIndicator } from './prisma.health';
 
 // Health endpoints are deliberately unversioned: orchestrators and uptime
@@ -17,6 +18,7 @@ export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly prisma: PrismaHealthIndicator,
+    private readonly jobs: JobsHealthIndicator,
   ) {}
 
   // Liveness: is the process up and answering? A failure here tells the
@@ -33,6 +35,9 @@ export class HealthController {
   @Get('ready')
   @HealthCheck()
   ready() {
-    return this.health.check([() => this.prisma.pingCheck('database')]);
+    return this.health.check([
+      () => this.prisma.pingCheck('database'),
+      () => this.jobs.check('jobs'),
+    ]);
   }
 }

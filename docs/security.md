@@ -30,6 +30,40 @@ See also [ADR-0003 (auth)](adr/0003-auth-token-strategy.md) and
   logged IPs are the real client's, not the proxy's. Over-trusting lets callers
   forge `X-Forwarded-For`.
 
+## Outbound requests / SSRF
+
+The GEO audit feature (`modules/geo`) fetches **user-supplied URLs** server-side,
+so it is a deliberate SSRF surface and is guarded accordingly by
+`src/modules/geo/url-guard.ts`:
+
+- **http(s) only** — any other scheme is rejected.
+- **DNS-resolved allow-check**: the host is resolved and the fetch is refused if
+  *any* returned address is non-public — loopback, private, link-local (incl.
+  `169.254.169.254` cloud metadata), CGNAT, and multicast/reserved. Both IPv4 and
+  IPv6 are covered, including IPv4-mapped (`::ffff:…`), IPv4-compat, and NAT64
+  (`64:ff9b::/96`) forms, plus unique-local (`fc00::/7`) and IPv6 link-local.
+- **Every redirect hop is re-validated**: the fetcher uses `redirect: 'manual'`
+  and runs each `Location` target back through the guard before following it.
+- **Streamed byte cap** (2 MB): the body is read incrementally and aborted once
+  the cap is hit, so an oversized/malicious response can't buffer unbounded
+  memory. A per-hop timeout covers the body read.
+- **Content-type gate**: the homepage fetch requires `text/html`.
+
+**Known residual (accepted):** the guard resolves DNS to validate, but the
+subsequent `fetch` re-resolves the host, so a DNS-rebinding record (public at
+validation, private at connect) is not fully closed. The code flags this;
+IP-pinning the validated address via a custom undici dispatcher is the future
+hardening.
+
+`GEO_ALLOW_PRIVATE_URLS=true` disables the guard for **dev/test only**. Env
+validation refuses to boot if it is `true` while `NODE_ENV=production` (see the
+`superRefine` in `env.validation.ts`), so it can never turn the fetcher into an
+internal proxy in production.
+
+`POST /v1/audits` is throttled to **20/min per IP** and each tenant is capped at
+**5 concurrent in-flight audits** (`PENDING`/`PROCESSING`); exceeding either
+returns 429.
+
 ## Data protection & privacy
 
 - Soft delete by default. The data model supports hard deletion / anonymisation

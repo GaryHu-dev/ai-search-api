@@ -18,3 +18,4 @@ new ADR that references the old one rather than editing history.
 | [0007](0007-observability.md) | Observability (OpenTelemetry + Sentry + Pino) |
 | [0008](0008-background-jobs-pg-boss.md) | Background jobs on pg-boss (no Redis) |
 | [0009](0009-deferred-capabilities.md) | Deliberately deferred capabilities (YAGNI) |
+| [0010](0010-geo-audit.md) | GEO audit: async deterministic checks + SSRF-guarded fetch |

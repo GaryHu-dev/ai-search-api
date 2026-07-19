@@ -16,7 +16,7 @@ import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuditsService } from './audits.service';
-import { AuditResponse } from './dto/audit.response';
+import { AuditResponse, AuditSummaryResponse } from './dto/audit.response';
 import { CreateAuditDto } from './dto/create-audit.dto';
 
 @ApiTags('audits')
@@ -41,10 +41,10 @@ export class AuditsController {
   }
 
   @Get()
-  async list(@Query() query: ListQuery): Promise<Page<AuditResponse>> {
+  async list(@Query() query: ListQuery): Promise<Page<AuditSummaryResponse>> {
     const page = await this.audits.list(query);
     return {
-      items: page.items.map((a) => AuditResponse.from(a)),
+      items: page.items.map((a) => AuditSummaryResponse.from(a)),
       nextCursor: page.nextCursor,
     };
   }

@@ -5,7 +5,14 @@ import { TenantContext } from '../tenancy/tenant-context';
 // Models whose rows belong to a tenant. Add a model here when it gains a
 // `tenantId` — this single list is the only thing to remember, instead of a
 // `where` clause on every query.
-const TENANT_MODELS = new Set<string>(['File', 'Audit']);
+export const TENANT_MODELS = new Set<string>(['File', 'Audit']);
+
+// Tenant-bearing models deliberately NOT auto-scoped: User and AuditLog are
+// reached only pre-auth (login by email), by the caller's own id from the JWT,
+// or write-only (the audit log has no read endpoint). A new tenant-bearing model
+// must go in TENANT_MODELS (scoped) or here (with a reason) — the tenant-model
+// coverage test fails otherwise, so the choice can't be forgotten.
+export const UNSCOPED_TENANT_MODELS = new Set<string>(['User', 'AuditLog']);
 
 // Operations that accept a `where` we can constrain to the current tenant.
 const WHERE_OPERATIONS = new Set<string>([

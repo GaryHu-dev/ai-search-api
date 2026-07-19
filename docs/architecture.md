@@ -1,7 +1,8 @@
 # Architecture
 
-A business-agnostic SaaS foundation on NestJS. The first product (an AI Search
-platform) is built on top of it, but nothing here knows about that domain.
+A business-agnostic SaaS foundation on NestJS. The foundation (`core/`,
+`integrations/`) knows nothing about the product domain; the product itself lives
+under `modules/` — today that's `geo`, the AI-search / GEO audit feature.
 
 For the *why* behind these choices, see the [ADRs](adr/README.md).
 
@@ -34,7 +35,7 @@ Every request carries an `x-request-id`; it appears in logs, both envelopes, and
 
 ```
 src/
-  modules/        Business features: auth, users, files
+  modules/        Business features: auth, users, files, geo
   core/           Infrastructure
     bootstrap/    configure*(app) — composed by main.ts and reused by e2e
     common/       filters, interceptors, decorators, utils, pagination
@@ -47,7 +48,8 @@ src/
 
 Business features live under `modules/`; cross-cutting infrastructure under
 `core/`; adapters to third-party services under `integrations/`
-([ADR-0005](adr/0005-directory-structure.md)).
+([ADR-0005](adr/0005-directory-structure.md)). Unit specs are co-located under
+each directory's `__tests__/` folder (e2e stays under top-level `test/`).
 
 ## Tenancy
 
@@ -66,6 +68,7 @@ use the plain `PrismaService` for system/non-tenant work.
 | `auth` | Register, login (password + Google), token issue/rotation, lockout |
 | `users` | The caller's own account: read, update, soft-delete |
 | `files` | Upload / list (paginated) / download / delete, tenant-scoped |
+| `geo` | GEO audit: async homepage analysis of a user-supplied URL (SSRF-guarded fetch, deterministic checks) |
 | `core/health` | Liveness and readiness probes |
 | `core/jobs` | Background jobs (pg-boss); refresh-token cleanup |
 | `core/audit` | Append-only audit log |

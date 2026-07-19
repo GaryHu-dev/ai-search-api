@@ -17,6 +17,26 @@ describe('validateEnv', () => {
     expect(env.NODE_ENV).toBe('test');
   });
 
+  it('refuses GEO_ALLOW_PRIVATE_URLS=true in production', () => {
+    expect(() =>
+      validateEnv({
+        ...validEnv,
+        NODE_ENV: 'production',
+        GEO_ALLOW_PRIVATE_URLS: 'true',
+      }),
+    ).toThrow(/GEO_ALLOW_PRIVATE_URLS/);
+  });
+
+  it('allows GEO_ALLOW_PRIVATE_URLS=true outside production', () => {
+    expect(() =>
+      validateEnv({
+        ...validEnv,
+        NODE_ENV: 'development',
+        GEO_ALLOW_PRIVATE_URLS: 'true',
+      }),
+    ).not.toThrow();
+  });
+
   it('applies defaults for the optional variables', () => {
     const env = validateEnv({
       DATABASE_URL: validEnv.DATABASE_URL,

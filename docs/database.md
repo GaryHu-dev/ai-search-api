@@ -23,6 +23,16 @@ PostgreSQL 17 via Prisma. Schema in `prisma/schema.prisma`, migrations in
 | `refresh_tokens` | Hashed, rotating refresh tokens |
 | `audit_logs` | Append-only action history (no FKs) |
 | `files` | Object-storage metadata, tenant-scoped |
+| `audits` | GEO audit reports, tenant-scoped (see below) |
+
+`audits` columns: `id`, `tenant_id`, `requested_by_id`, `url`, `status`
+(`AuditStatus` enum: `PENDING` / `PROCESSING` / `COMPLETED` / `FAILED`),
+`findings` (JSONB), `error`, `fetched_at`, `created_at`, `updated_at`; indexed on
+`(tenant_id, created_at)`.
+
+Note the two similarly-named tables are unrelated: `audit_logs` is the append-only
+security log (`core/audit`, `AuditService`), while `audits` holds GEO reports
+(`modules/geo`, `AuditsService`).
 
 ## Workflow
 

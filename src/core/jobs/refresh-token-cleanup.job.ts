@@ -15,16 +15,13 @@ export class RefreshTokenCleanupJob implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
   ) {}
 
-  // Register the queue on application bootstrap, not module init: Nest runs a
-  // module's onModuleInit hooks in parallel (Promise.all), so this would
-  // otherwise race JobsService starting pg-boss and creating its schema.
-  // onApplicationBootstrap runs only after every onModuleInit has resolved.
+  // Registered on bootstrap (JobsService guarantees pg-boss has started by then).
   async onApplicationBootstrap(): Promise<void> {
-    const boss = this.jobs.client;
-    await boss.createQueue(QUEUE);
-    await boss.work(QUEUE, () => this.purgeStale());
+    await this.jobs.registerWorker(QUEUE, async () => {
+      await this.purgeStale();
+    });
     // Daily at 03:00 UTC. Scheduling is idempotent on (queue, cron).
-    await boss.schedule(QUEUE, '0 3 * * *');
+    await this.jobs.registerSchedule(QUEUE, '0 3 * * *');
   }
 
   // Public so it can be invoked directly in tests without waiting for the cron.

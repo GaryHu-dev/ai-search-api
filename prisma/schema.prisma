@@ -176,6 +176,9 @@ model Audit {
   error         String?
   fetchedAt     DateTime?   @db.Timestamptz(6)
   createdAt     DateTime    @default(now()) @db.Timestamptz(6)
+  // Bumped on every write (incl. the PENDING->PROCESSING claim), so the reaper
+  // can find audits stuck in PROCESSING past a threshold.
+  updatedAt     DateTime    @updatedAt @db.Timestamptz(6)
 
   @@index([tenantId, createdAt])
   @@map("audits")

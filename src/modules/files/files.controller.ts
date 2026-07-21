@@ -16,6 +16,13 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { ListQuery, Page } from '../../core/common/pagination';
+import { attachmentDisposition } from '../../core/common/utils/content-disposition';
+
+// Types a browser might execute inline. Even with nosniff + attachment, serve
+// these as an opaque download so a stored HTML/SVG can't run if ever linked.
+const EXECUTABLE_TYPE = /html|javascript|xml|svg/i;
+const safeDownloadType = (type: string): string =>
+  EXECUTABLE_TYPE.test(type) ? 'application/octet-stream' : type;
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -68,8 +75,8 @@ export class FilesController {
   ): Promise<StreamableFile> {
     const { file, stream } = await this.files.download(id);
     return new StreamableFile(stream, {
-      type: file.contentType,
-      disposition: `attachment; filename="${file.filename}"`,
+      type: safeDownloadType(file.contentType),
+      disposition: attachmentDisposition(file.filename),
     });
   }
 

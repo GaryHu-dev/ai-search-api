@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Keep GitHub Actions versions valid and current — closes the class of
+  # "action version no longer exists" failures. Low volume, so monthly is plenty.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
+
+  # Keep npm dependencies patched, but monthly and grouped to keep PR noise low.
+  # Minor/patch bumps land as a single PR; majors come individually for review.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    # Only propose versions that have aged a week, so they clear pnpm's
+    # minimum-release-age supply-chain policy (a fresh release is refused by
+    # `pnpm install`). Keeps the two from fighting.
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        update-types: ['minor', 'patch']

@@ -11,6 +11,8 @@
 # Local environment — never commit real secrets
 .env
 .env.*.local
+# Holds real production values locally for reference; must never be committed
+.env.production
 
 # Logs
 *.log

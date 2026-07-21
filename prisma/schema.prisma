@@ -36,8 +36,9 @@ model Tenant {
 
   createdAt DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @db.Timestamptz(6)
-  // Soft delete: hides the tenant without destroying history. Irreversible
-  // erasure is handled separately for privacy requests.
+  // Soft delete: hides the tenant without destroying history. Cascade FKs make
+  // an irreversible privacy erasure possible, but that's a manual/DB-level op
+  // today — there's no erasure endpoint yet.
   deletedAt DateTime? @db.Timestamptz(6)
 
   @@map("tenants")
@@ -63,8 +64,8 @@ model User {
 
   createdAt DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @db.Timestamptz(6)
-  // Soft delete by default; personal data still supports hard deletion to meet
-  // AU/NZ privacy obligations.
+  // Soft delete by default. Cascade FKs make a hard privacy erasure possible
+  // (AU/NZ obligations), though no erasure endpoint exists yet.
   deletedAt DateTime? @db.Timestamptz(6)
 
   // Every tenant-scoped lookup filters on tenantId first, so lead the index
@@ -153,4 +154,32 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+enum AuditStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// A GEO audit of a single URL's homepage. Created PENDING, then filled in by a
+// background worker (see geo-audit.worker.ts). Tenant-scoped — see
+// tenant-scope.extension.ts.
+model SiteAudit {
+  id            String      @id @default(uuid(7)) @db.Uuid
+  tenantId      String      @db.Uuid
+  requestedById String      @db.Uuid
+  url           String
+  status        AuditStatus @default(PENDING)
+  findings      Json?
+  error         String?
+  fetchedAt     DateTime?   @db.Timestamptz(6)
+  createdAt     DateTime    @default(now()) @db.Timestamptz(6)
+  // Bumped on every write (incl. the PENDING->PROCESSING claim), so the reaper
+  // can find audits stuck in PROCESSING past a threshold.
+  updatedAt     DateTime    @updatedAt @db.Timestamptz(6)
+
+  @@index([tenantId, createdAt])
+  @@map("audits")
 }

@@ -30,4 +30,6 @@ Beyond the linters:
 
 - Unit-test logic-bearing services (mock dependencies); e2e-test HTTP flows
   against real services. e2e reuse `configureApp` so they match production.
+- Unit specs are co-located under each directory's `__tests__/` folder; e2e specs
+  live under the top-level `test/`.
 - A floating promise is an error (`no-floating-promises`).

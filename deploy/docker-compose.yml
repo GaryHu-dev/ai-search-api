@@ -1,0 +1,50 @@
+name: omniport
+# Server-side stack. GitHub Actions builds the api image, ships it here as a
+# tarball (docker load) — no registry. Object storage is Cloudflare R2
+# (external), so no MinIO runs here — the server only hosts the app, the
+# database and the reverse proxy.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: app
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    # Loaded onto the server from a tarball by the deploy workflow (no registry).
+    image: omniport-api:latest
+    pull_policy: never
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health/live',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # Grace period while migrations run and the app boots on first start.
+      start_period: 40s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./www:/srv/www:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  pgdata:
+  caddy-data:
+  caddy-config:

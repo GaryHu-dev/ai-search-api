@@ -110,6 +110,31 @@ describeStorage('Files (e2e)', () => {
     expect(names).not.toContain('unrelated.txt');
   });
 
+  it('rejects an upload larger than the size limit with 413', async () => {
+    const oversize = Buffer.alloc(11 * 1024 * 1024); // > 10 MB default limit
+    const res = await request(server)
+      .post('/v1/files')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', oversize, { filename: 'big.bin' });
+    expect(res.status).toBe(413);
+  });
+
+  it('sets a safe Content-Disposition on download (sanitised, RFC 5987)', async () => {
+    const uploaded = await request(server)
+      .post('/v1/files')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('file', Buffer.from('x'), { filename: 'report.txt' });
+    expect(uploaded.status).toBe(201);
+
+    const res = await request(server)
+      .get(`/v1/files/${uploaded.body.data.id}/download`)
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(res.status).toBe(200);
+    // The header is built by attachmentDisposition (quote/newline handling is
+    // unit-tested); here we just confirm the RFC 5987 form reaches the client.
+    expect(res.headers['content-disposition']).toContain("filename*=UTF-8''");
+  });
+
   it('rejects an unauthenticated upload', async () => {
     const res = await request(server)
       .post('/v1/files')

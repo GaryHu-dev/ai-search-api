@@ -1,9 +1,10 @@
 # SaaS API
 
-A business-agnostic SaaS foundation built with NestJS. The first product built
-on top of it is an AI Search platform, but this codebase deliberately keeps no
-knowledge of that domain — the aim is a small, boring, well-understood base that
-future products can sit on.
+A business-agnostic SaaS foundation built with NestJS. The foundation itself
+(`core/`, `integrations/`) deliberately keeps no knowledge of any product domain
+— the aim is a small, boring, well-understood base that future products can sit
+on. The first product, an AI Search / GEO audit feature, lives under
+`src/modules/geo/`.
 
 ## Stack
 
@@ -51,6 +52,7 @@ src/
     auth/    Registration, login (password + Google), tokens, lockout
     users/   The caller's own account: read, update, soft-delete
     files/   Upload/list/download/delete, tenant-scoped
+    geo/     GEO audit: async homepage analysis (SSRF-guarded fetch)
   core/                    Cross-cutting infrastructure
     bootstrap/ configure*(app) — composed by main.ts, reused by e2e
     audit/     Append-only audit log (who did what, when)
@@ -80,8 +82,9 @@ Full docs live in [`docs/`](docs/):
 
 - [Architecture](docs/architecture.md) · [Security](docs/security.md) ·
   [Database](docs/database.md) · [Deployment](docs/deployment.md)
-- [API conventions](docs/api.md) · [Coding style](docs/coding-style.md) ·
-  [Contributing](docs/contributing.md) · [Troubleshooting](docs/troubleshooting.md)
+- [API conventions](docs/api.md) · [Frontend integration](docs/frontend-integration.md) ·
+  [Coding style](docs/coding-style.md) · [Contributing](docs/contributing.md) ·
+  [Troubleshooting](docs/troubleshooting.md)
 - [Architecture Decision Records](docs/adr/README.md) — the *why* behind the
   key choices.
 

@@ -1,7 +1,8 @@
 # Architecture
 
-A business-agnostic SaaS foundation on NestJS. The first product (an AI Search
-platform) is built on top of it, but nothing here knows about that domain.
+A business-agnostic SaaS foundation on NestJS. The foundation (`core/`,
+`integrations/`) knows nothing about the product domain; the product itself lives
+under `modules/` — today that's `geo`, the AI-search / GEO audit feature.
 
 For the *why* behind these choices, see the [ADRs](adr/README.md).
 
@@ -19,11 +20,13 @@ There is no repository layer — services use Prisma directly ([ADR-0001](adr/00
 1. **ThrottlerGuard** — global rate limit (tighter on credential routes).
 2. **JwtAuthGuard** (on protected routes) — validates the access token, sets
    `request.user = { userId, tenantId, email }`.
-3. **TimeoutInterceptor** — fails a handler that runs too long.
-4. **ValidationPipe** — validates and transforms the body against its DTO.
-5. **Controller → Service** — business logic; tenant-scoped queries.
-6. **ResponseEnvelopeInterceptor** — wraps success as `{ data, requestId }`.
-7. **AllExceptionsFilter** — renders any error as the error envelope.
+3. **TenantContextInterceptor** — binds `request.user.tenantId` to the async
+   context so the Prisma tenant-scope extension filters queries automatically.
+4. **TimeoutInterceptor** — fails a handler that runs too long.
+5. **ValidationPipe** — validates and transforms the body against its DTO.
+6. **Controller → Service** — business logic; tenant-scoped queries.
+7. **ResponseEnvelopeInterceptor** — wraps success as `{ data, requestId }`.
+8. **AllExceptionsFilter** — renders any error as the error envelope.
 
 Every request carries an `x-request-id`; it appears in logs, both envelopes, and
 (when OpenTelemetry is on) alongside a `trace_id`.
@@ -32,7 +35,7 @@ Every request carries an `x-request-id`; it appears in logs, both envelopes, and
 
 ```
 src/
-  modules/        Business features: auth, users, files
+  modules/        Business features: auth, users, files, geo
   core/           Infrastructure
     bootstrap/    configure*(app) — composed by main.ts and reused by e2e
     common/       filters, interceptors, decorators, utils, pagination
@@ -45,7 +48,8 @@ src/
 
 Business features live under `modules/`; cross-cutting infrastructure under
 `core/`; adapters to third-party services under `integrations/`
-([ADR-0005](adr/0005-directory-structure.md)).
+([ADR-0005](adr/0005-directory-structure.md)). Unit specs are co-located under
+each directory's `__tests__/` folder (e2e stays under top-level `test/`).
 
 ## Tenancy
 
@@ -64,6 +68,7 @@ use the plain `PrismaService` for system/non-tenant work.
 | `auth` | Register, login (password + Google), token issue/rotation, lockout |
 | `users` | The caller's own account: read, update, soft-delete |
 | `files` | Upload / list (paginated) / download / delete, tenant-scoped |
+| `geo` | GEO audit: async homepage analysis of a user-supplied URL (SSRF-guarded fetch, deterministic checks) |
 | `core/health` | Liveness and readiness probes |
 | `core/jobs` | Background jobs (pg-boss); refresh-token cleanup |
 | `core/audit` | Append-only audit log |

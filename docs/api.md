@@ -30,6 +30,9 @@ the cross-cutting conventions.
 | GET/PATCH/DELETE | `/v1/users/me` | The caller's own account |
 | POST/GET | `/v1/files` | Upload / list (paginated) |
 | GET/DELETE | `/v1/files/:id/download`, `/v1/files/:id` | Download / delete |
+| POST | `/v1/audits` | Start a GEO audit (`202`, runs async; 20/min per IP, 5 in-flight per tenant) |
+| GET | `/v1/audits/:id` | Poll one audit until `COMPLETED`/`FAILED` |
+| GET | `/v1/audits` | List audits (paginated `ListQuery`: `limit`/`cursor`/`sort`/`search`) |
 | GET | `/health/live`, `/health/ready` | Probes (unversioned, raw shape) |
 
 Downloads (`StreamableFile`) and health probes return raw bodies (no success

@@ -6,11 +6,12 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import * as Sentry from '@sentry/node';
 import { Request, Response } from 'express';
 
-// HttpStatus.INTERNAL_SERVER_ERROR as a plain number, so the threshold check
-// stays a number-to-number comparison.
+// The 5xx cutoff: at or above this we log and report to Sentry; below it is an
+// expected client error.
 const SERVER_ERROR_MIN = 500;
 
 interface ErrorBody {
@@ -86,6 +87,41 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error: record.error ?? exception.name,
         message: record.message ?? exception.message,
       };
+    }
+
+    // Map the Prisma errors we expect to their HTTP meaning so they don't fall
+    // through to a generic 500 (e.g. a unique-constraint race on register).
+    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      if (exception.code === 'P2002') {
+        return {
+          status: HttpStatus.CONFLICT,
+          error: 'Conflict',
+          message: 'A record with these details already exists',
+        };
+      }
+      if (exception.code === 'P2025') {
+        return {
+          status: HttpStatus.NOT_FOUND,
+          error: 'NotFound',
+          message: 'The requested record was not found',
+        };
+      }
+    }
+
+    // Multer rejects oversize/invalid uploads before the handler runs.
+    if (exception instanceof Error && exception.name === 'MulterError') {
+      const code = (exception as { code?: string }).code;
+      return code === 'LIMIT_FILE_SIZE'
+        ? {
+            status: HttpStatus.PAYLOAD_TOO_LARGE,
+            error: 'PayloadTooLarge',
+            message: 'The uploaded file exceeds the maximum allowed size',
+          }
+        : {
+            status: HttpStatus.BAD_REQUEST,
+            error: 'BadRequest',
+            message: 'Invalid file upload',
+          };
     }
 
     // Anything that isn't an HttpException is a bug: never leak its details.

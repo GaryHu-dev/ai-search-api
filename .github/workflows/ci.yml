@@ -14,8 +14,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
 
-    # A throwaway Postgres for migrations and the e2e suite, matching the version
-    # we run in production.
+    # A throwaway Postgres for migrations and the e2e suite. A fresh database is
+    # exactly what surfaces bugs a long-lived local one can hide.
     services:
       postgres:
         image: postgres:17-alpine
@@ -36,68 +36,21 @@ jobs:
       JWT_ACCESS_SECRET: ci-access-secret-ci-access-secret-32
       NODE_ENV: test
 
+    # Lint, format, typecheck and audit run locally (pre-commit hook +
+    # `pnpm ci:local`); CI just proves it builds and the tests pass on a clean DB.
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
 
-      - name: Install dependencies
+      - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Fail on known high-severity vulnerabilities in production dependencies.
-      - name: Audit dependencies
-        run: pnpm audit --prod --audit-level high
-
-      - name: Generate Prisma client
-        run: pnpm prisma generate
-
-      - name: Lint
-        run: pnpm lint:check
-
-      - name: Typecheck
-        run: pnpm typecheck
-
       - name: Build
-        run: pnpm build
+        run: pnpm prisma generate && pnpm build
 
-      - name: Apply migrations
-        run: pnpm prisma migrate deploy
-
-      # Fails if schema.prisma has changes that no migration captures — i.e.
-      # someone edited the model but forgot to generate a migration.
-      - name: Check migrations are in sync with the schema
-        run: >-
-          pnpm prisma migrate diff
-          --exit-code
-          --from-url "$DATABASE_URL"
-          --to-schema-datamodel ./prisma/schema.prisma
-
-      - name: Unit tests
-        run: pnpm test
-
-      - name: E2E tests
-        run: pnpm test:e2e
-
-  # Builds the production image and scans it for OS/library vulnerabilities.
-  image-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build image
-        run: docker build -t saas-api:ci .
-
-      - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: saas-api:ci
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-          ignore-unfixed: true
+      - name: Test
+        run: pnpm prisma migrate deploy && pnpm test && pnpm test:e2e

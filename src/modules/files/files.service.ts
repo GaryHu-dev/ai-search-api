@@ -38,8 +38,8 @@ export class FilesService {
     const key = `${tenantId}/${randomUUID()}`;
     await this.storage.put(key, input.buffer, input.mimetype);
 
-    // tenantId is a required column, so it's set explicitly here; the extension
-    // reinforces it. (Forgetting it on a create fails loudly, not silently.)
+    // tenantId is a required column with no default. The tenant-scope extension
+    // also injects it from context, so this explicit value is belt-and-braces.
     return this.prisma.file.create({
       data: {
         tenantId,
@@ -78,14 +78,25 @@ export class FilesService {
 
   async download(id: string): Promise<{ file: File; stream: Readable }> {
     const file = await this.getOwned(id);
-    const stream = await this.storage.get(file.key);
-    return { file, stream };
+    try {
+      const stream = await this.storage.get(file.key);
+      return { file, stream };
+    } catch (err) {
+      // Row exists but the object is gone (orphaned) — a 404 is truer than 500.
+      if (err instanceof Error && err.name === 'NoSuchKey') {
+        throw new NotFoundException('File content is no longer available');
+      }
+      throw err;
+    }
   }
 
   async remove(id: string): Promise<void> {
     const file = await this.getOwned(id);
-    await this.storage.delete(file.key);
+    // Delete the row first: if the object delete then fails we're left with a
+    // harmless orphaned object, not a row pointing at a missing object (which
+    // would 500 on the next download).
     await this.prisma.file.delete({ where: { id: file.id } });
+    await this.storage.delete(file.key);
   }
 
   private async getOwned(id: string): Promise<File> {

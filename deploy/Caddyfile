@@ -1,0 +1,15 @@
+omniport.online, www.omniport.online {
+	encode gzip zstd
+
+	# Backend: https://omniport.online/api/v1/... -> api:3000/v1/...
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	# Frontend SPA (static files in ./www), with history fallback.
+	handle {
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
+	}
+}

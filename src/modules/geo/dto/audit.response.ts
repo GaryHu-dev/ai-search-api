@@ -1,9 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Audit } from '@prisma/client';
+import { SiteAudit } from '@prisma/client';
 import { Finding } from '../geo.types';
 
 // Concrete class for Swagger; runtime value is mapped from the Prisma row.
-export class AuditResponse {
+export class SiteAuditResponse {
   @ApiProperty() id!: string;
   @ApiProperty() url!: string;
   @ApiProperty({ enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'] })
@@ -13,7 +13,7 @@ export class AuditResponse {
   @ApiProperty({ nullable: true }) error!: string | null;
   @ApiProperty() createdAt!: Date;
 
-  static from(a: Audit): AuditResponse {
+  static from(a: SiteAudit): SiteAuditResponse {
     return {
       id: a.id,
       url: a.url,
@@ -25,13 +25,13 @@ export class AuditResponse {
   }
 }
 
-type AuditSummaryRow = Pick<
-  Audit,
+type SiteAuditSummaryRow = Pick<
+  SiteAudit,
   'id' | 'url' | 'status' | 'error' | 'createdAt'
 >;
 
 // The list shape: no findings (fetch those from GET /audits/:id).
-export class AuditSummaryResponse {
+export class SiteAuditSummaryResponse {
   @ApiProperty() id!: string;
   @ApiProperty() url!: string;
   @ApiProperty({ enum: ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'] })
@@ -39,7 +39,7 @@ export class AuditSummaryResponse {
   @ApiProperty({ nullable: true }) error!: string | null;
   @ApiProperty() createdAt!: Date;
 
-  static from(a: AuditSummaryRow): AuditSummaryResponse {
+  static from(a: SiteAuditSummaryRow): SiteAuditSummaryResponse {
     return {
       id: a.id,
       url: a.url,

@@ -19,10 +19,12 @@ import {
   GeoAuditJobData,
 } from './geo.constants';
 
-// An audit run should finish in seconds; anything still PROCESSING past this is
-// a worker that died mid-run (crash/deploy) — the reaper fails it so the client
-// stops polling forever.
-const STALE_PROCESSING_MS = 5 * 60 * 1000;
+// An audit run should finish in seconds. Anything still PENDING (created but
+// never claimed) or PROCESSING (claimed but the worker died mid-run) past this
+// window is stuck — the reaper fails it so the client stops polling forever.
+// Kept well above the audit job's expireInSeconds (300s) so pg-boss expiry and
+// the reaper don't race a still-running audit.
+const STALE_PROCESSING_MS = 15 * 60 * 1000;
 
 // Audits (and the scraped third-party content in their findings) are retained
 // for this long, then purged.
@@ -58,30 +60,39 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
     await TenantContext.run(tenantId, async () => {
       // Claim the audit atomically: only one worker moves it PENDING -> PROCESSING,
       // so a redelivery or duplicate worker can't run it twice.
-      const claimed = await this.prisma.audit.updateMany({
+      const claimed = await this.prisma.siteAudit.updateMany({
         where: { id: auditId, status: 'PENDING' },
         data: { status: 'PROCESSING' },
       });
       if (claimed.count === 0) return;
 
-      const audit = await this.prisma.audit.findFirst({
+      const audit = await this.prisma.siteAudit.findFirst({
         where: { id: auditId },
       });
       if (!audit) return;
 
+      // The completion writes guard on status: 'PROCESSING'. If the reaper has
+      // already flipped this row to FAILED (a slow/stalled run), we must not
+      // resurrect it to COMPLETED/FAILED with fresh data. On success we also
+      // clear any stale error left by a prior attempt.
       try {
         const findings = await this.runner.run(audit.url);
-        await this.prisma.audit.update({
-          where: { id: auditId },
-          data: { status: 'COMPLETED', findings, fetchedAt: new Date() },
+        await this.prisma.siteAudit.updateMany({
+          where: { id: auditId, status: 'PROCESSING' },
+          data: {
+            status: 'COMPLETED',
+            findings,
+            error: null,
+            fetchedAt: new Date(),
+          },
         });
       } catch (err) {
         this.logger.error(
           `Audit ${auditId} failed`,
           err instanceof Error ? err.stack : err,
         );
-        await this.prisma.audit.update({
-          where: { id: auditId },
+        await this.prisma.siteAudit.updateMany({
+          where: { id: auditId, status: 'PROCESSING' },
           data: {
             status: 'FAILED',
             error: err instanceof Error ? err.message : 'Audit failed',
@@ -96,8 +107,15 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
   // the plain client because it spans tenants (a maintenance task, not a request).
   private async reapStale(): Promise<void> {
     const cutoff = new Date(Date.now() - STALE_PROCESSING_MS);
-    const { count } = await this.db.audit.updateMany({
-      where: { status: 'PROCESSING', updatedAt: { lt: cutoff } },
+    // Covers a worker that died mid-run (PROCESSING) AND an audit that was
+    // created but never enqueued/claimed (a PENDING orphan from a crash between
+    // create and enqueue). updatedAt equals createdAt until the claim, so the
+    // one cutoff catches both.
+    const { count } = await this.db.siteAudit.updateMany({
+      where: {
+        status: { in: ['PENDING', 'PROCESSING'] },
+        updatedAt: { lt: cutoff },
+      },
       data: { status: 'FAILED', error: 'Audit timed out' },
     });
     if (count > 0) this.logger.warn(`Reaped ${count} stalled audit(s)`);
@@ -106,7 +124,7 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
   // Cross-tenant retention sweep: remove audits past the retention window.
   private async purgeOld(): Promise<void> {
     const cutoff = new Date(Date.now() - RETENTION_MS);
-    const { count } = await this.db.audit.deleteMany({
+    const { count } = await this.db.siteAudit.deleteMany({
       where: { createdAt: { lt: cutoff } },
     });
     if (count > 0) this.logger.log(`Purged ${count} old audit(s)`);

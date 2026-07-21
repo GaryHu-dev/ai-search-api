@@ -15,16 +15,19 @@ import { ListQuery, Page } from '../../core/common/pagination';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { AuditsService } from './audits.service';
-import { AuditResponse, AuditSummaryResponse } from './dto/audit.response';
+import { SiteAuditsService } from './audits.service';
+import {
+  SiteAuditResponse,
+  SiteAuditSummaryResponse,
+} from './dto/audit.response';
 import { CreateAuditDto } from './dto/create-audit.dto';
 
 @ApiTags('audits')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('audits')
-export class AuditsController {
-  constructor(private readonly audits: AuditsService) {}
+export class SiteAuditsController {
+  constructor(private readonly audits: SiteAuditsService) {}
 
   @Post()
   @HttpCode(202) // accepted; runs asynchronously, poll GET /audits/:id
@@ -34,17 +37,19 @@ export class AuditsController {
   async create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateAuditDto,
-  ): Promise<AuditResponse> {
-    return AuditResponse.from(
+  ): Promise<SiteAuditResponse> {
+    return SiteAuditResponse.from(
       await this.audits.create(dto.url, user.userId, user.tenantId),
     );
   }
 
   @Get()
-  async list(@Query() query: ListQuery): Promise<Page<AuditSummaryResponse>> {
+  async list(
+    @Query() query: ListQuery,
+  ): Promise<Page<SiteAuditSummaryResponse>> {
     const page = await this.audits.list(query);
     return {
-      items: page.items.map((a) => AuditSummaryResponse.from(a)),
+      items: page.items.map((a) => SiteAuditSummaryResponse.from(a)),
       nextCursor: page.nextCursor,
     };
   }
@@ -52,7 +57,7 @@ export class AuditsController {
   @Get(':id')
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<AuditResponse> {
-    return AuditResponse.from(await this.audits.findOne(id));
+  ): Promise<SiteAuditResponse> {
+    return SiteAuditResponse.from(await this.audits.findOne(id));
   }
 }

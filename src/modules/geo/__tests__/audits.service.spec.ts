@@ -1,9 +1,9 @@
-import { AuditsService } from '../audits.service';
+import { SiteAuditsService } from '../audits.service';
 import { GEO_AUDIT_QUEUE } from '../geo.constants';
 
-describe('AuditsService', () => {
+describe('SiteAuditsService', () => {
   const prisma = {
-    audit: {
+    siteAudit: {
       create: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -14,13 +14,13 @@ describe('AuditsService', () => {
   const enqueue = jest.fn();
   const jobs = { enqueue };
 
-  const service = new AuditsService(prisma as never, jobs as never);
+  const service = new SiteAuditsService(prisma as never, jobs as never);
 
   beforeEach(() => jest.clearAllMocks());
 
   it('creates a PENDING audit and enqueues a job', async () => {
-    prisma.audit.count.mockResolvedValue(0);
-    prisma.audit.create.mockResolvedValue({
+    prisma.siteAudit.count.mockResolvedValue(0);
+    prisma.siteAudit.create.mockResolvedValue({
       id: 'a1',
       tenantId: 't1',
       status: 'PENDING',
@@ -28,7 +28,7 @@ describe('AuditsService', () => {
 
     const audit = await service.create('https://x.com', 'u1', 't1');
 
-    expect(prisma.audit.create).toHaveBeenCalledWith({
+    expect(prisma.siteAudit.create).toHaveBeenCalledWith({
       data: { url: 'https://x.com', requestedById: 'u1', tenantId: 't1' },
     });
     expect(enqueue).toHaveBeenCalledWith(
@@ -40,29 +40,29 @@ describe('AuditsService', () => {
   });
 
   it('marks the audit FAILED if enqueue throws (no PENDING orphan)', async () => {
-    prisma.audit.count.mockResolvedValue(0);
-    prisma.audit.create.mockResolvedValue({ id: 'a1', tenantId: 't1' });
+    prisma.siteAudit.count.mockResolvedValue(0);
+    prisma.siteAudit.create.mockResolvedValue({ id: 'a1', tenantId: 't1' });
     enqueue.mockRejectedValue(new Error('queue down'));
 
     await expect(service.create('https://x.com', 'u1', 't1')).rejects.toThrow();
-    expect(prisma.audit.update).toHaveBeenCalledWith({
+    expect(prisma.siteAudit.update).toHaveBeenCalledWith({
       where: { id: 'a1' },
       data: { status: 'FAILED', error: 'Could not queue the audit' },
     });
   });
 
   it('rejects with 429 when the tenant has too many in-flight audits', async () => {
-    prisma.audit.count.mockResolvedValue(5);
+    prisma.siteAudit.count.mockResolvedValue(5);
 
     await expect(
       service.create('https://x.com', 'u1', 't1'),
     ).rejects.toMatchObject({ status: 429 });
-    expect(prisma.audit.create).not.toHaveBeenCalled();
+    expect(prisma.siteAudit.create).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('throws NotFound when an audit is not in the tenant', async () => {
-    prisma.audit.findFirst.mockResolvedValue(null);
+    prisma.siteAudit.findFirst.mockResolvedValue(null);
     await expect(service.findOne('missing')).rejects.toThrow('Audit not found');
   });
 });

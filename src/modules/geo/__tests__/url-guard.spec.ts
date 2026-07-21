@@ -15,6 +15,10 @@ describe('isBlockedAddress', () => {
     '::ffff:7f00:1', // ...as the URL parser serialises it (hex)
     '::ffff:a9fe:a9fe', // 169.254.169.254 mapped (hex) — cloud metadata
     '64:ff9b::7f00:1', // NAT64 of 127.0.0.1
+    '198.18.0.5', // benchmarking /15
+    '198.19.10.1', // benchmarking /15
+    '192.0.0.1', // IETF protocol assignments /24
+    '192.88.99.1', // 6to4 relay anycast /24
   ])('blocks %s', (ip) => {
     expect(isBlockedAddress(ip)).toBe(true);
   });
@@ -27,9 +31,12 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress(host)).toBe(true);
   });
 
-  it.each(['8.8.8.8', '1.1.1.1', '93.184.216.34'])('allows public %s', (ip) => {
-    expect(isBlockedAddress(ip)).toBe(false);
-  });
+  it.each(['8.8.8.8', '1.1.1.1', '93.184.216.34', '198.20.0.1', '192.0.1.1'])(
+    'allows public %s',
+    (ip) => {
+      expect(isBlockedAddress(ip)).toBe(false);
+    },
+  );
 });
 
 describe('assertFetchableUrl', () => {

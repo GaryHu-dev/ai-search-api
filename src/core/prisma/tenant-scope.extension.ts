@@ -5,7 +5,7 @@ import { TenantContext } from '../tenancy/tenant-context';
 // Models whose rows belong to a tenant. Add a model here when it gains a
 // `tenantId` — this single list is the only thing to remember, instead of a
 // `where` clause on every query.
-export const TENANT_MODELS = new Set<string>(['File', 'Audit']);
+export const TENANT_MODELS = new Set<string>(['File', 'SiteAudit']);
 
 // Tenant-bearing models deliberately NOT auto-scoped: User and AuditLog are
 // reached only pre-auth (login by email), by the caller's own id from the JWT,
@@ -39,19 +39,32 @@ const UNSCOPABLE_OPERATIONS = new Set<string>([
 // Pure, testable core: returns a copy of `args` constrained to `tenantId` for
 // the given operation. Reads/updates/deletes gain a `where.tenantId`; creates
 // gain `data.tenantId`.
+// A write carrying an explicit tenantId that differs from the current context
+// is a bug (a caller trying to write into another tenant). Fail loudly instead
+// of silently overriding it, which would hide the mistake.
+function assertTenantMatches(row: any, tenantId: string): void {
+  if (row && row.tenantId !== undefined && row.tenantId !== tenantId) {
+    throw new Error('Explicit tenantId does not match the tenant context');
+  }
+}
+
 export function scopeArgs(operation: string, args: any, tenantId: string): any {
   const scoped = { ...(args ?? {}) };
 
   if (WHERE_OPERATIONS.has(operation)) {
     scoped.where = { ...(scoped.where ?? {}), tenantId };
   } else if (operation === 'create') {
+    assertTenantMatches(scoped.data, tenantId);
     scoped.data = { ...(scoped.data ?? {}), tenantId };
   } else if (operation === 'createMany') {
+    const rows = Array.isArray(scoped.data) ? scoped.data : [scoped.data];
+    rows.forEach((row: any) => assertTenantMatches(row, tenantId));
     scoped.data = Array.isArray(scoped.data)
       ? scoped.data.map((row: any) => ({ ...row, tenantId }))
       : { ...scoped.data, tenantId };
   } else if (operation === 'upsert') {
     scoped.where = { ...(scoped.where ?? {}), tenantId };
+    assertTenantMatches(scoped.create, tenantId);
     scoped.create = { ...(scoped.create ?? {}), tenantId };
   }
 

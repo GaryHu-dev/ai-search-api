@@ -25,6 +25,7 @@ export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
   private readonly client?: S3Client;
   private readonly bucket?: string;
+  private readonly isProduction: boolean;
 
   constructor(config: ConfigService<Env, true>) {
     const endpoint = config.get('STORAGE_ENDPOINT', { infer: true });
@@ -33,6 +34,8 @@ export class StorageService implements OnModuleInit {
       infer: true,
     });
     this.bucket = config.get('STORAGE_BUCKET', { infer: true });
+    this.isProduction =
+      config.get('NODE_ENV', { infer: true }) === 'production';
 
     if (endpoint && accessKeyId && secretAccessKey && this.bucket) {
       this.client = new S3Client({
@@ -51,7 +54,13 @@ export class StorageService implements OnModuleInit {
       );
       return;
     }
-    await this.ensureBucket(this.client, this.bucket);
+    if (this.isProduction) {
+      // Production: verify the bucket exists and fail fast. Never auto-create —
+      // that would silently mask a misconfigured bucket name or missing perms.
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+    } else {
+      await this.ensureBucket(this.client, this.bucket);
+    }
   }
 
   async put(key: string, body: Buffer, contentType: string): Promise<void> {

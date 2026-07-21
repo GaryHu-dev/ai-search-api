@@ -1,7 +1,8 @@
 name: omniport
-# Server-side stack. The api image is built & pushed by GitHub Actions; the
-# server only pulls it. Object storage is Cloudflare R2 (external), so no MinIO
-# runs here — the server only hosts the app, the database and the reverse proxy.
+# Server-side stack. GitHub Actions builds the api image, ships it here as a
+# tarball (docker load) — no registry. Object storage is Cloudflare R2
+# (external), so no MinIO runs here — the server only hosts the app, the
+# database and the reverse proxy.
 services:
   db:
     image: postgres:17-alpine
@@ -18,7 +19,9 @@ services:
       retries: 20
 
   api:
-    image: ghcr.io/garyhu-dev/ai-search-api:latest
+    # Loaded onto the server from a tarball by the deploy workflow (no registry).
+    image: omniport-api:latest
+    pull_policy: never
     env_file: .env
     restart: unless-stopped
     depends_on:

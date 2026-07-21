@@ -4,7 +4,20 @@ export const clientRenderingCheck: GeoCheck = {
   dimension: 'client-rendering',
   run(ctx: PageContext): Finding {
     const bodyText = ctx.$('body').text().replace(/\s+/g, ' ').trim();
-    const scripts = ctx.$('script').length;
+    // Count only executable scripts. Data blocks like <script
+    // type="application/ld+json"> (structured data) and other non-JS types don't
+    // render content, so counting them would falsely flag a short server-rendered
+    // page — and would penalise adding the JSON-LD the structured-data check asks
+    // for.
+    const scripts = ctx.$('script').filter((_, el) => {
+      const type = (ctx.$(el).attr('type') ?? '').trim().toLowerCase();
+      return (
+        type === '' ||
+        type === 'text/javascript' ||
+        type === 'application/javascript' ||
+        type === 'module'
+      );
+    }).length;
     // Flag either a near-empty page (nothing for engines to read at all) or the
     // classic SPA shell (little server text, but scripts that would render it).
     const looksClientSide =

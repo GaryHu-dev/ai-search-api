@@ -21,7 +21,6 @@ describe('AuthService', () => {
     user: { update: jest.fn() },
     tenant: { findUnique: jest.fn() },
   };
-  const google = { verify: jest.fn() };
   const audit = { record: jest.fn() };
   const config = {
     get: jest.fn(
@@ -37,7 +36,6 @@ describe('AuthService', () => {
       users as unknown as UsersService,
       passwords,
       tokens as unknown as TokenService,
-      google,
       audit as unknown as AuditService,
       config as unknown as ConfigService<Env, true>,
     );
@@ -182,13 +180,8 @@ describe('AuthService', () => {
     });
   });
 
-  describe('loginWithGoogle', () => {
+  describe('issueSessionForGoogleUser', () => {
     it('creates a new account for a first-time Google user', async () => {
-      google.verify.mockResolvedValue({
-        email: 'new@example.com',
-        sub: 'g-1',
-        name: 'New',
-      });
       users.findByEmail.mockResolvedValue(null);
       prisma.loginMethod.findUnique.mockResolvedValue(null);
       prisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
@@ -201,17 +194,17 @@ describe('AuthService', () => {
       });
       tokens.issue.mockResolvedValue({ accessToken: 'a' });
 
-      await service.loginWithGoogle('id-token');
+      await service.issueSessionForGoogleUser({
+        email: 'new@example.com',
+        googleId: 'g-1',
+        displayName: 'New',
+      });
 
       expect(users.createUserWithTenant).toHaveBeenCalled();
       expect(tokens.issue).toHaveBeenCalled();
     });
 
     it('links Google to an existing account (same email = same person)', async () => {
-      google.verify.mockResolvedValue({
-        email: 'jane@example.com',
-        sub: 'g-1',
-      });
       users.findByEmail.mockResolvedValue({
         id: 'u1',
         tenantId: 't1',
@@ -223,7 +216,10 @@ describe('AuthService', () => {
       prisma.loginMethod.upsert.mockResolvedValue({});
       tokens.issue.mockResolvedValue({ accessToken: 'a' });
 
-      await service.loginWithGoogle('id-token');
+      await service.issueSessionForGoogleUser({
+        email: 'jane@example.com',
+        googleId: 'g-1',
+      });
 
       expect(prisma.loginMethod.upsert).toHaveBeenCalled();
       expect(users.createUserWithTenant).not.toHaveBeenCalled();
@@ -232,17 +228,39 @@ describe('AuthService', () => {
       );
     });
 
-    it('rejects a soft-deleted account', async () => {
-      google.verify.mockResolvedValue({
-        email: 'gone@example.com',
-        sub: 'g-1',
+    it('resolves a returning user by their stable Google id', async () => {
+      prisma.loginMethod.findUnique.mockResolvedValue({
+        user: {
+          id: 'u1',
+          tenantId: 't1',
+          email: 'jane@example.com',
+          deletedAt: null,
+        },
       });
+      prisma.tenant.findUnique.mockResolvedValue({ id: 't1', deletedAt: null });
+      tokens.issue.mockResolvedValue({ accessToken: 'a' });
+
+      await service.issueSessionForGoogleUser({
+        email: 'jane@example.com',
+        googleId: 'g-1',
+      });
+
+      expect(users.findByEmail).not.toHaveBeenCalled();
+      expect(tokens.issue).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'u1' }),
+      );
+    });
+
+    it('rejects a soft-deleted account', async () => {
       prisma.loginMethod.findUnique.mockResolvedValue(null);
       users.findByEmail.mockResolvedValue({ id: 'u1', deletedAt: new Date() });
 
-      await expect(service.loginWithGoogle('id-token')).rejects.toBeInstanceOf(
-        UnauthorizedException,
-      );
+      await expect(
+        service.issueSessionForGoogleUser({
+          email: 'gone@example.com',
+          googleId: 'g-1',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(tokens.issue).not.toHaveBeenCalled();
     });
   });

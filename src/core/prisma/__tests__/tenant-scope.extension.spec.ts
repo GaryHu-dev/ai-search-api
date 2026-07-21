@@ -51,4 +51,16 @@ describe('scopeArgs (tenant-scope injection)', () => {
     scopeArgs('findFirst', original, T);
     expect(original).toEqual({ where: { id: 'x' } });
   });
+
+  it('throws when a create carries a mismatched explicit tenantId', () => {
+    expect(() =>
+      scopeArgs('create', { data: { name: 'a', tenantId: 'other' } }, T),
+    ).toThrow(/tenant context/);
+  });
+
+  it('allows an explicit tenantId that matches the context', () => {
+    expect(scopeArgs('create', { data: { a: 1, tenantId: T } }, T)).toEqual({
+      data: { a: 1, tenantId: T },
+    });
+  });
 });

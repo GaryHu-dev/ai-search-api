@@ -11,7 +11,7 @@ function isBlockedV4(ip: string): boolean {
   if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
     return true;
   }
-  const [a, b] = p;
+  const [a, b, c] = p;
   return (
     a === 0 || // "this" network
     a === 127 || // loopback
@@ -20,6 +20,9 @@ function isBlockedV4(ip: string): boolean {
     (a === 192 && b === 168) || // private
     (a === 169 && b === 254) || // link-local (incl. 169.254.169.254 metadata)
     (a === 100 && b >= 64 && b <= 127) || // CGNAT
+    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 benchmarking
+    (a === 192 && b === 0 && c === 0) || // 192.0.0.0/24 IETF protocol assignments
+    (a === 192 && b === 88 && c === 99) || // 192.88.99.0/24 6to4 relay anycast
     a >= 224 // multicast + reserved
   );
 }

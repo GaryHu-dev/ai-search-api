@@ -1,6 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 // Cursor-based pagination: resilient to inserts/deletes between pages (unlike
 // offset pagination) and cheap on indexed columns. The cursor is an opaque id;
@@ -16,7 +24,7 @@ export class PaginationQuery {
 
   @ApiPropertyOptional({ description: 'Return items after this id.' })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   cursor?: string;
 }
 
@@ -34,6 +42,7 @@ export class ListQuery extends PaginationQuery {
   @ApiPropertyOptional({ description: 'Free-text search (endpoint-specific).' })
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   search?: string;
 }
 

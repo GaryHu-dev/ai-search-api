@@ -11,12 +11,12 @@ import { AuditService } from '../../core/audit/audit.service';
 import { normaliseEmail } from '../../core/common/utils/normalise-email';
 import { Env } from '../../core/config/env.validation';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { GoogleVerifier } from '../../integrations/google/google.verifier';
 import { UsersService } from '../users/users.service';
 import { AuthTokens } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { PasswordService } from './password.service';
+import { GoogleAuthUser } from './strategies/google.strategy';
 import { TokenService } from './token.service';
 
 @Injectable()
@@ -26,7 +26,6 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
-    private readonly google: GoogleVerifier,
     private readonly audit: AuditService,
     private readonly config: ConfigService<Env, true>,
   ) {}
@@ -168,8 +167,13 @@ export class AuthService {
     return this.tokens.revoke(refreshToken);
   }
 
-  async loginWithGoogle(idToken: string): Promise<AuthTokens> {
-    const profile = await this.google.verify(idToken);
+  // Provisions (or resolves) the user behind a verified Google identity and
+  // issues a session for them. The Google profile is proven upstream: either by
+  // GoogleStrategy in the server-side redirect flow, or previously by an id-token
+  // verifier — this method trusts the { email, googleId } it's handed.
+  async issueSessionForGoogleUser(
+    profile: GoogleAuthUser,
+  ): Promise<AuthTokens> {
     const email = normaliseEmail(profile.email);
 
     // Resolve by the stable Google account id (`sub`) first: a user's Google
@@ -180,7 +184,7 @@ export class AuthService {
       where: {
         provider_providerAccountId: {
           provider: 'GOOGLE',
-          providerAccountId: profile.sub,
+          providerAccountId: profile.googleId,
         },
       },
       include: { user: true },
@@ -213,14 +217,14 @@ export class AuthService {
       existing ??
       (await this.prisma.$transaction(async (tx) => {
         const created = await this.users.createUserWithTenant(
-          { email, displayName: profile.name },
+          { email, displayName: profile.displayName },
           tx,
         );
         await tx.loginMethod.create({
           data: {
             userId: created.id,
             provider: 'GOOGLE',
-            providerAccountId: profile.sub,
+            providerAccountId: profile.googleId,
           },
         });
         return created;
@@ -234,9 +238,9 @@ export class AuthService {
         create: {
           userId: user.id,
           provider: 'GOOGLE',
-          providerAccountId: profile.sub,
+          providerAccountId: profile.googleId,
         },
-        update: { providerAccountId: profile.sub },
+        update: { providerAccountId: profile.googleId },
       });
     }
 

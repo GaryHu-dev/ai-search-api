@@ -71,8 +71,11 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     handler: (data: T) => Promise<void>,
   ): Promise<void> {
     await this.boss.createQueue(queue);
-    await this.boss.work<T>(queue, async (jobs) => {
-      await Promise.all(jobs.map((job) => handler(job.data)));
+    // batchSize: 1 — one job per invocation, so a throw fails (and retries) only
+    // that job. Without it pg-boss can deliver a batch and a single failing
+    // handler would fail the whole batch, re-running its already-succeeded peers.
+    await this.boss.work<T>(queue, { batchSize: 1 }, async ([job]) => {
+      await handler(job.data);
     });
   }
 

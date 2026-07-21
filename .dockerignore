@@ -4,6 +4,7 @@ coverage
 .git
 .env
 .env.*.local
+.env.production
 *.log
 Dockerfile
 .dockerignore

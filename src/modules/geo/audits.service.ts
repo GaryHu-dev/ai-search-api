@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Audit } from '@prisma/client';
+import { SiteAudit } from '@prisma/client';
 import { ListQuery, Page, parseSort } from '../../core/common/pagination';
 import { JobsService } from '../../core/jobs/jobs.service';
 import {
@@ -22,13 +22,13 @@ const MAX_INFLIGHT_PER_TENANT = 5;
 
 // List rows omit the (potentially large) findings JSON; full findings come from
 // findOne.
-export type AuditSummary = Pick<
-  Audit,
+export type SiteAuditSummary = Pick<
+  SiteAudit,
   'id' | 'url' | 'status' | 'error' | 'createdAt'
 >;
 
 @Injectable()
-export class AuditsService {
+export class SiteAuditsService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly jobs: JobsService,
@@ -41,10 +41,12 @@ export class AuditsService {
     url: string,
     requestedById: string,
     tenantId: string,
-  ): Promise<Audit> {
-    // Tenant-scoped count (the extension injects tenantId): reject if too many
-    // are already queued/running for this tenant.
-    const inflight = await this.prisma.audit.count({
+  ): Promise<SiteAudit> {
+    // Best-effort soft cap: count-then-create is not atomic, so a burst of
+    // concurrent submissions can slip past it. That's acceptable here — the
+    // per-IP throttle on the controller bounds the burst, and the cap only
+    // exists to blunt sustained queue-flooding, not to be a hard invariant.
+    const inflight = await this.prisma.siteAudit.count({
       where: { status: { in: ['PENDING', 'PROCESSING'] } },
     });
     if (inflight >= MAX_INFLIGHT_PER_TENANT) {
@@ -54,7 +56,7 @@ export class AuditsService {
       );
     }
 
-    const audit = await this.prisma.audit.create({
+    const audit = await this.prisma.siteAudit.create({
       data: { url, requestedById, tenantId },
     });
     const payload: GeoAuditJobData = {
@@ -69,7 +71,7 @@ export class AuditsService {
       });
     } catch (err) {
       // Don't leave a PENDING orphan that no worker will ever pick up.
-      await this.prisma.audit.update({
+      await this.prisma.siteAudit.update({
         where: { id: audit.id },
         data: { status: 'FAILED', error: 'Could not queue the audit' },
       });
@@ -78,17 +80,17 @@ export class AuditsService {
     return audit;
   }
 
-  async findOne(id: string): Promise<Audit> {
-    const audit = await this.prisma.audit.findFirst({ where: { id } });
+  async findOne(id: string): Promise<SiteAudit> {
+    const audit = await this.prisma.siteAudit.findFirst({ where: { id } });
     if (!audit) throw new NotFoundException('Audit not found');
     return audit;
   }
 
-  async list(query: ListQuery): Promise<Page<AuditSummary>> {
+  async list(query: ListQuery): Promise<Page<SiteAuditSummary>> {
     const where = query.search
       ? { url: { contains: query.search, mode: 'insensitive' as const } }
       : {};
-    const rows = await this.prisma.audit.findMany({
+    const rows = await this.prisma.siteAudit.findMany({
       where,
       select: {
         id: true,

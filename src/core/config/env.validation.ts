@@ -63,8 +63,16 @@ const envSchema = z
     // Error tracking. Disabled unless a Sentry DSN is provided.
     SENTRY_DSN: z.string().optional(),
 
-    // Optional: Google sign-in is only enabled when a client id is configured.
+    // Optional: backend-driven Google sign-in (authorization-code / redirect
+    // flow). Enabled only when CLIENT_ID + CLIENT_SECRET + CALLBACK_URL are all
+    // set; otherwise the strategy isn't registered and the routes stay dormant.
+    // CALLBACK_URL is where Google redirects back (must match the Google Cloud
+    // console). POST_LOGIN_REDIRECT is the frontend URL we bounce the browser to
+    // afterwards, with the tokens (or an error) in the URL fragment.
     GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
+    GOOGLE_CALLBACK_URL: z.string().url().optional(),
+    GOOGLE_POST_LOGIN_REDIRECT: z.string().url().optional(),
 
     // Optional: S3-compatible object storage. MinIO locally, Cloudflare R2 in
     // production. File features are disabled until these are set.

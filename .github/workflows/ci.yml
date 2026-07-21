@@ -13,6 +13,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     # A throwaway Postgres for migrations and the e2e suite. A fresh database is
     # exactly what surfaces bugs a long-lived local one can hide.
@@ -35,9 +36,18 @@ jobs:
       DATABASE_URL: postgresql://app:app@localhost:5432/app?schema=public
       JWT_ACCESS_SECRET: ci-access-secret-ci-access-secret-32
       NODE_ENV: test
+      # S3-compatible storage (MinIO below). Same S3 API as production R2, so the
+      # file / tenant-isolation e2e tests exercise the real code path instead of
+      # being skipped. CI never touches production R2.
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_BUCKET: app-files
+      STORAGE_ACCESS_KEY_ID: minioadmin
+      STORAGE_SECRET_ACCESS_KEY: minioadmin
+      STORAGE_FORCE_PATH_STYLE: "true"
 
-    # Lint, format, typecheck and audit run locally (pre-commit hook +
-    # `pnpm ci:local`); CI just proves it builds and the tests pass on a clean DB.
+    # CI is the authority — it does not rely on the local pre-commit hook, which
+    # can be bypassed (--no-verify, missing hooks, web/API commits).
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -49,8 +59,35 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm prisma generate
+
+      - name: Lint
+        run: pnpm lint:check
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Audit (prod deps, high severity)
+        run: pnpm audit --prod --audit-level high
+
       - name: Build
-        run: pnpm prisma generate && pnpm build
+        run: pnpm build
+
+      - name: Start MinIO (S3-compatible storage for file/tenant e2e)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:9000/minio/health/live && break
+            echo "waiting for minio ($i/30)"; sleep 2
+          done
+          docker run --rm --network host minio/mc alias set m http://localhost:9000 minioadmin minioadmin
+          docker run --rm --network host minio/mc mb --ignore-existing m/app-files
 
       - name: Test
         run: pnpm prisma migrate deploy && pnpm test && pnpm test:e2e

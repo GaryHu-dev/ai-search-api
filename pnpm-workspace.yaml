@@ -11,8 +11,11 @@ allowBuilds:
 
 # Force the patched multer (>=2.2.0) in place of the vulnerable 1.x that
 # @nestjs/platform-express pulls in (GHSA-72gw-mp4g-v24j, DoS).
+# Force patched brace-expansion (>=2.1.2) for the vulnerable 2.x pulled in deep
+# via @opentelemetry/... > minimatch (GHSA-3jxr-9vmj-r5cp, ReDoS/DoS).
 overrides:
   multer: '>=2.2.0'
+  'brace-expansion@2': '>=2.1.2'
 
 # Don't re-run `pnpm install` before every script — we manage installs
 # explicitly, and the implicit check breaks tools that shell out to pnpm.

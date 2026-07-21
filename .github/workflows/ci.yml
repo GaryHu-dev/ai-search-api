@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # push only on main (drives deploy); branch work is covered by the PR event,
+  # so a branch with an open PR doesn't run CI twice.
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
 
 # Cancel superseded runs on the same ref to save minutes.
@@ -13,6 +15,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     # A throwaway Postgres for migrations and the e2e suite. A fresh database is
     # exactly what surfaces bugs a long-lived local one can hide.
@@ -35,9 +38,18 @@ jobs:
       DATABASE_URL: postgresql://app:app@localhost:5432/app?schema=public
       JWT_ACCESS_SECRET: ci-access-secret-ci-access-secret-32
       NODE_ENV: test
+      # S3-compatible storage (MinIO below). Same S3 API as production R2, so the
+      # file / tenant-isolation e2e tests exercise the real code path instead of
+      # being skipped. CI never touches production R2.
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_BUCKET: app-files
+      STORAGE_ACCESS_KEY_ID: minioadmin
+      STORAGE_SECRET_ACCESS_KEY: minioadmin
+      STORAGE_FORCE_PATH_STYLE: "true"
 
-    # Lint, format, typecheck and audit run locally (pre-commit hook +
-    # `pnpm ci:local`); CI just proves it builds and the tests pass on a clean DB.
+    # CI is the authority — it does not rely on the local pre-commit hook, which
+    # can be bypassed (--no-verify, missing hooks, web/API commits).
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -49,8 +61,153 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm prisma generate
+
+      - name: Lint
+        run: pnpm lint:check
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Audit (prod deps, high severity)
+        run: pnpm audit --prod --audit-level high
+
       - name: Build
-        run: pnpm prisma generate && pnpm build
+        run: pnpm build
+
+      - name: Start MinIO (S3-compatible storage for file/tenant e2e)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:9000/minio/health/live && break
+            echo "waiting for minio ($i/30)"; sleep 2
+          done
+          docker run --rm --network host minio/mc alias set m http://localhost:9000 minioadmin minioadmin
+          docker run --rm --network host minio/mc mb --ignore-existing m/app-files
 
       - name: Test
         run: pnpm prisma migrate deploy && pnpm test && pnpm test:e2e
+
+  # Deploy only runs after `verify` passes, and only on a push to main. On PRs
+  # and dev pushes it is skipped. This gates CD on CI at the workflow level, on
+  # top of the branch-protection rule.
+  deploy:
+    needs: verify
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-omniport
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image (layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: omniport-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image to a tarball
+        run: docker save omniport-api:latest | gzip > deploy/image.tar.gz
+
+      - name: Copy image + config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "deploy/docker-compose.yml,deploy/Caddyfile,deploy/image.tar.gz"
+          target: "/opt/omniport"
+          strip_components: 1
+
+      - name: Deploy (health-gated, auto-rollback)
+        uses: appleboy/ssh-action@v1
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 15m
+          envs: R2_ENDPOINT,R2_BUCKET,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,POSTGRES_PASSWORD,JWT_ACCESS_SECRET
+          script: |
+            set -e
+            if ! command -v openssl >/dev/null; then apt-get update -qq && apt-get install -y -qq openssl; fi
+            cd /opt/omniport
+            # Keep the currently-running image as a rollback target.
+            docker image inspect omniport-api:latest >/dev/null 2>&1 && docker tag omniport-api:latest omniport-api:previous || true
+            docker load -i image.tar.gz && rm -f image.tar.gz
+            mkdir -p www
+            # DB password + JWT from GitHub Secrets (match local .env.production);
+            # fall back to the existing .env, then to a generated value. The db
+            # volume is initialised with the password, so keep it stable.
+            DBPASS="${POSTGRES_PASSWORD:-}"
+            JWT="${JWT_ACCESS_SECRET:-}"
+            if [ -z "$DBPASS" ] && [ -f .env ]; then DBPASS=$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-); fi
+            if [ -z "$JWT" ] && [ -f .env ]; then JWT=$(grep '^JWT_ACCESS_SECRET=' .env | cut -d= -f2-); fi
+            DBPASS=${DBPASS:-$(openssl rand -hex 16)}
+            JWT=${JWT:-$(openssl rand -base64 48 | tr -d '\n')}
+            cat > .env <<EOF
+            NODE_ENV=production
+            DATABASE_URL=postgresql://app:${DBPASS}@db:5432/app?schema=public
+            POSTGRES_PASSWORD=${DBPASS}
+            JWT_ACCESS_SECRET=${JWT}
+            TRUST_PROXY=1
+            CORS_ORIGINS=https://omniport.online,https://www.omniport.online
+            EOF
+            if [ -n "$R2_ENDPOINT" ]; then
+              cat >> .env <<EOF
+            STORAGE_ENDPOINT=${R2_ENDPOINT}
+            STORAGE_BUCKET=${R2_BUCKET}
+            STORAGE_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+            STORAGE_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+            STORAGE_FORCE_PATH_STYLE=false
+            EOF
+            fi
+            if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]; then
+              cat >> .env <<EOF
+            GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+            GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+            GOOGLE_CALLBACK_URL=https://omniport.online/api/v1/auth/google/callback
+            GOOGLE_POST_LOGIN_REDIRECT=https://omniport.online/auth/callback
+            EOF
+            fi
+            # Roll out and WAIT for container healthchecks. On failure, roll back
+            # to the previous image so a bad build can't take the site down.
+            if docker compose up -d --wait --wait-timeout 120; then
+              echo "deploy healthy"
+              docker image prune -f
+            else
+              echo "health check failed - rolling back to previous image"
+              if docker image inspect omniport-api:previous >/dev/null 2>&1; then
+                docker tag omniport-api:previous omniport-api:latest
+                docker compose up -d --wait --wait-timeout 120 || true
+              fi
+              exit 1
+            fi
+
+      - name: Smoke test (public HTTPS health)
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS -m 10 https://omniport.online/api/health/ready >/dev/null; then
+              echo "live and healthy"; exit 0
+            fi
+            echo "waiting for app to be reachable... ($i/12)"; sleep 5
+          done
+          echo "smoke test failed - app not reachable/healthy"; exit 1

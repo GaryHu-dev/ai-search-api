@@ -11,6 +11,7 @@ import {
 } from '../../core/prisma/prisma.module';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TenantContext } from '../../core/tenancy/tenant-context';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuditRunner } from './audit-runner';
 import {
   GEO_AUDIT_QUEUE,
@@ -40,6 +41,7 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
     @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     // Plain client for the cross-tenant reaper (a system sweep, not request-scoped).
     private readonly db: PrismaService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -77,7 +79,7 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
       // clear any stale error left by a prior attempt.
       try {
         const findings = await this.runner.run(audit.url);
-        await this.prisma.siteAudit.updateMany({
+        const done = await this.prisma.siteAudit.updateMany({
           where: { id: auditId, status: 'PROCESSING' },
           data: {
             status: 'COMPLETED',
@@ -86,12 +88,15 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
             fetchedAt: new Date(),
           },
         });
+        if (done.count > 0) {
+          await this.notifyAudit(audit, 'COMPLETED');
+        }
       } catch (err) {
         this.logger.error(
           `Audit ${auditId} failed`,
           err instanceof Error ? err.stack : err,
         );
-        await this.prisma.siteAudit.updateMany({
+        const failed = await this.prisma.siteAudit.updateMany({
           where: { id: auditId, status: 'PROCESSING' },
           data: {
             status: 'FAILED',
@@ -99,8 +104,38 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
             fetchedAt: new Date(),
           },
         });
+        if (failed.count > 0) {
+          await this.notifyAudit(audit, 'FAILED');
+        }
       }
     });
+  }
+
+  // Best-effort: a notification failure must not fail the audit, which is
+  // already persisted. Runs inside the handler's TenantContext, and passes
+  // tenantId explicitly, so the notification is correctly tenant/user-scoped.
+  private async notifyAudit(
+    audit: { id: string; url: string; tenantId: string; requestedById: string },
+    status: 'COMPLETED' | 'FAILED',
+  ): Promise<void> {
+    try {
+      await this.notifications.notify({
+        userId: audit.requestedById,
+        tenantId: audit.tenantId,
+        type: status === 'COMPLETED' ? 'audit.completed' : 'audit.failed',
+        title: status === 'COMPLETED' ? 'Audit complete' : 'Audit failed',
+        body:
+          status === 'COMPLETED'
+            ? `Your audit of ${audit.url} is ready.`
+            : `Your audit of ${audit.url} could not be completed.`,
+        data: { auditId: audit.id },
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to create notification for audit ${audit.id}`,
+        err instanceof Error ? err.stack : err,
+      );
+    }
   }
 
   // Cross-tenant sweep: fail audits stuck in PROCESSING past the threshold. Uses
@@ -111,14 +146,36 @@ export class GeoAuditWorker implements OnApplicationBootstrap {
     // created but never enqueued/claimed (a PENDING orphan from a crash between
     // create and enqueue). updatedAt equals createdAt until the claim, so the
     // one cutoff catches both.
-    const { count } = await this.db.siteAudit.updateMany({
+    const candidates = await this.db.siteAudit.findMany({
       where: {
         status: { in: ['PENDING', 'PROCESSING'] },
         updatedAt: { lt: cutoff },
       },
-      data: { status: 'FAILED', error: 'Audit timed out' },
+      select: { id: true, tenantId: true, requestedById: true, url: true },
     });
-    if (count > 0) this.logger.warn(`Reaped ${count} stalled audit(s)`);
+
+    let reaped = 0;
+    for (const row of candidates) {
+      // Guarded transition, re-checked per row: only flip (and notify) a row
+      // still stale at this instant, so one the worker completed in the
+      // meantime between the findMany above and here isn't resurrected.
+      const { count } = await this.db.siteAudit.updateMany({
+        where: {
+          id: row.id,
+          status: { in: ['PENDING', 'PROCESSING'] },
+          updatedAt: { lt: cutoff },
+        },
+        data: { status: 'FAILED', error: 'Audit timed out' },
+      });
+      if (count === 0) continue;
+      reaped++;
+      // Best-effort, same as notifyAudit's own try/catch: a notification
+      // failure must not break the reaper loop for the remaining candidates.
+      await TenantContext.run(row.tenantId, () =>
+        this.notifyAudit(row, 'FAILED'),
+      );
+    }
+    if (reaped > 0) this.logger.warn(`Reaped ${reaped} stalled audit(s)`);
   }
 
   // Cross-tenant retention sweep: remove audits past the retention window.

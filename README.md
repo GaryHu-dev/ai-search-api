@@ -1,10 +1,13 @@
-# SaaS API
+# Omniport
 
-A business-agnostic SaaS foundation built with NestJS. The foundation itself
-(`core/`, `integrations/`) deliberately keeps no knowledge of any product domain
-— the aim is a small, boring, well-understood base that future products can sit
-on. The first product, an AI Search / GEO audit feature, lives under
-`src/modules/geo/`.
+Omniport — a multi-tenant platform that helps businesses get found in Google
+and AI search, built with NestJS. The foundation itself (`core/`,
+`integrations/`, plus the base modules `auth`, `users`, `files`,
+`notifications`) is product-agnostic and deliberately keeps no knowledge of
+any product domain — the aim is a small, boring, well-understood base that
+product modules sit on. Today's product module is `geo`: an async GEO site
+audit that analyzes how visible a site is to AI search. Planned (roadmap, not
+yet built): SEO/GEO content generation and publishing to WordPress/Shopify.
 
 ## Stack
 
@@ -49,10 +52,11 @@ Business features live under `src/modules/`; cross-cutting infrastructure under
 ```
 src/
   modules/                 Business features
-    auth/    Registration, login (password + Google), tokens, lockout
-    users/   The caller's own account: read, update, soft-delete
-    files/   Upload/list/download/delete, tenant-scoped
-    geo/     GEO audit: async homepage analysis (SSRF-guarded fetch)
+    auth/          Foundation. Registration, login (password + Google), tokens, lockout
+    users/         Foundation. The caller's own account: read, update, soft-delete
+    files/         Foundation. Upload/list/download/delete, tenant-scoped
+    notifications/ Foundation. Per-user notification inbox, tenant- and user-scoped
+    geo/           Product module. GEO audit: async homepage analysis (SSRF-guarded fetch)
   core/                    Cross-cutting infrastructure
     bootstrap/ configure*(app) — composed by main.ts, reused by e2e
     audit/     Append-only audit log (who did what, when)
@@ -64,7 +68,6 @@ src/
     prisma/    Prisma client lifecycle + tenant-scope extension
     tenancy/   Per-request tenant context (automatic isolation)
   integrations/            External-service adapters
-    google/    Google ID-token verification
     storage/   S3-compatible object storage (MinIO locally, R2 in production)
   app.module.ts
   main.ts                  Thin: otel/sentry, create app, configureApp, listen
@@ -80,6 +83,7 @@ classes both under its `dto/`).
 
 Full docs live in [`docs/`](docs/):
 
+- [Product overview](docs/product.md) — what Omniport is, and the roadmap.
 - [Architecture](docs/architecture.md) · [Security](docs/security.md) ·
   [Database](docs/database.md) · [Deployment](docs/deployment.md)
 - [API conventions](docs/api.md) · [Frontend integration](docs/frontend-integration.md) ·

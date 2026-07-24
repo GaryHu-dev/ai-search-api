@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { fetch, Agent, type Response } from 'undici';
 import { Env } from '../../core/config/env.validation';
-import { assertFetchableUrl } from './url-guard';
+import { assertFetchableUrl, ValidatedAddress } from './url-guard';
 
 export interface FetchedPage {
   url: string; // final URL after any redirects
@@ -60,12 +61,22 @@ export class PageFetcher {
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      // Per-hop dispatcher pinned to the IP this hop's validation approved, so
+      // DNS cannot be re-resolved to a different address between validation and
+      // connect (closes the rebinding TOCTOU). Closed in finally to free sockets.
+      let dispatcher: Agent | undefined;
       try {
-        await assertFetchableUrl(current, this.allowPrivate);
+        const pinned = await assertFetchableUrl(current, this.allowPrivate);
+        dispatcher = pinned ? pinnedDispatcher(pinned) : undefined;
+        // Both `fetch` and `Agent` are imported from the same `undici` package
+        // (not Node's global fetch), so `dispatcher` is a native RequestInit
+        // field — no type-widening workaround needed, and the dispatcher is
+        // guaranteed to be the exact implementation `fetch` expects.
         const res = await fetch(current, {
           headers: { 'user-agent': USER_AGENT },
           redirect: 'manual',
           signal: controller.signal,
+          dispatcher,
         });
 
         if (res.status >= 300 && res.status < 400) {
@@ -87,31 +98,56 @@ export class PageFetcher {
         return null;
       } finally {
         clearTimeout(timer);
+        // Fire-and-forget: the request is done (or aborted); just release sockets.
+        void dispatcher?.close().catch(() => undefined);
       }
     }
     return null; // too many redirects
   }
 
   // Streams the body and stops once MAX_BYTES is reached, so an oversized (or
-  // malicious) response can't buffer unbounded memory.
+  // malicious) response can't buffer unbounded memory. Returns null when the
+  // body exceeds the cap: a truncated page would be scored as if complete,
+  // producing bogus "missing content" findings, so an oversized page is treated
+  // as unfetchable (same as any other failure) rather than audited.
   private async readCapped(res: Response): Promise<string | null> {
     const declared = Number(res.headers.get('content-length'));
     if (declared && declared > MAX_BYTES) return null;
     if (!res.body) return null;
 
-    const reader = res.body.getReader();
+    // undici's `Response.body` is a `node:stream/web` `ReadableStream` typed
+    // with a default (`any`) generic, so the reader is annotated explicitly —
+    // the chunks are Uint8Array at runtime, same as under the global fetch.
+    const reader: ReadableStreamDefaultReader<Uint8Array> =
+      res.body.getReader();
     const chunks: Uint8Array[] = [];
     let total = 0;
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value }: ReadableStreamReadResult<Uint8Array> =
+        await reader.read();
       if (done) break;
       total += value.length;
       if (total > MAX_BYTES) {
         await reader.cancel();
-        break;
+        return null; // oversized → unfetchable, do not score truncated HTML
       }
       chunks.push(value);
     }
     return Buffer.concat(chunks).toString('utf8');
   }
+}
+
+// Builds a one-request undici dispatcher whose DNS lookup always returns the
+// already-validated IP, so the socket connects to exactly that address. The
+// hostname is left untouched, so undici still uses it for TLS SNI/servername and
+// the Host header — certificate validation runs against the hostname (not the
+// pinned IP) and is NOT weakened.
+function pinnedDispatcher(pinned: ValidatedAddress): Agent {
+  return new Agent({
+    connect: {
+      lookup: (_hostname, _options, callback) => {
+        callback(null, [{ address: pinned.address, family: pinned.family }]);
+      },
+    },
+  });
 }

@@ -1,3 +1,4 @@
+import { ListQuery } from '../../../core/common/pagination';
 import { SiteAuditsService } from '../audits.service';
 import { GEO_AUDIT_QUEUE } from '../geo.constants';
 
@@ -64,5 +65,54 @@ describe('SiteAuditsService', () => {
   it('throws NotFound when an audit is not in the tenant', async () => {
     prisma.siteAudit.findFirst.mockResolvedValue(null);
     await expect(service.findOne('missing')).rejects.toThrow('Audit not found');
+  });
+
+  describe('list', () => {
+    const row = (id: string) => ({
+      id,
+      url: `https://x.com/${id}`,
+      status: 'DONE',
+      error: null,
+      createdAt: new Date(`2024-01-0${id}`),
+    });
+    const query = (over: Partial<ListQuery> = {}): ListQuery => ({
+      limit: 2,
+      ...over,
+    });
+
+    it('slices the extra row and sets nextCursor to the last item returned', async () => {
+      prisma.siteAudit.findMany.mockResolvedValue([
+        row('1'),
+        row('2'),
+        row('3'),
+      ]);
+
+      const page = await service.list(query());
+
+      expect(page.items).toEqual([row('1'), row('2')]);
+      expect(page.nextCursor).toBe('2');
+      expect(prisma.siteAudit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 3 }),
+      );
+    });
+
+    it('returns nextCursor null when there is no extra row past the limit', async () => {
+      prisma.siteAudit.findMany.mockResolvedValue([row('1'), row('2')]);
+
+      const page = await service.list(query());
+
+      expect(page.items).toEqual([row('1'), row('2')]);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it('passes cursor/skip through to findMany when a cursor is given', async () => {
+      prisma.siteAudit.findMany.mockResolvedValue([]);
+
+      await service.list(query({ cursor: 'abc' }));
+
+      expect(prisma.siteAudit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor: { id: 'abc' }, skip: 1 }),
+      );
+    });
   });
 });

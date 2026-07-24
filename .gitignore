@@ -22,3 +22,5 @@
 .idea
 .vscode/*
 !.vscode/extensions.json
+docs/superpowers/
+.superpowers/

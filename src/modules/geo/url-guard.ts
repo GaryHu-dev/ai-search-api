@@ -82,17 +82,27 @@ export function isBlockedAddress(ip: string): boolean {
   return true;
 }
 
+// A single validated address the fetch must pin its connection to. `family` is
+// 4 or 6, as reported by DNS resolution / literal-IP detection.
+export interface ValidatedAddress {
+  address: string;
+  family: 4 | 6;
+}
+
 // Throws if `target` is not safe to fetch server-side. Resolves the host and
 // rejects if ANY resolved address is non-public (defeats round-robin DNS).
 // `allowPrivate` (dev/test only) disables the private-range block.
 //
-// Residual: the subsequent fetch re-resolves the hostname, so a rebinding record
-// (public here, private at connect time) is not fully closed. Pinning the
-// validated IP via a custom undici dispatcher is the future hardening.
+// Returns the validated IP the caller MUST pin its connection to (or null when
+// `allowPrivate` skips resolution). Pinning closes the DNS-rebinding TOCTOU gap:
+// without it the subsequent fetch re-resolves the hostname and could connect to
+// a different (private/internal) IP than the one validated here. The caller uses
+// this address for the socket connection only, keeping the hostname for TLS SNI
+// and the Host header so certificate validation is unchanged.
 export async function assertFetchableUrl(
   target: string,
   allowPrivate: boolean,
-): Promise<void> {
+): Promise<ValidatedAddress | null> {
   let url: URL;
   try {
     url = new URL(target);
@@ -102,16 +112,27 @@ export async function assertFetchableUrl(
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('Only http(s) URLs may be audited');
   }
-  if (allowPrivate) return;
+  if (allowPrivate) return null;
 
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = isIP(host)
-    ? [{ address: host }]
-    : await lookup(host, { all: true });
+  const literalVersion = isIP(host);
+  const addresses: ValidatedAddress[] = literalVersion
+    ? [{ address: host, family: literalVersion as 4 | 6 }]
+    : (await lookup(host, { all: true })).map((a) => ({
+        address: a.address,
+        family: a.family as 4 | 6,
+      }));
 
+  if (addresses.length === 0) {
+    throw new Error('URL host did not resolve');
+  }
   for (const { address } of addresses) {
     if (isBlockedAddress(address)) {
       throw new Error('URL resolves to a disallowed address');
     }
   }
+
+  // Every resolved address passed validation, so pinning any one of them is
+  // safe; pin the first. This is the exact IP the socket must connect to.
+  return addresses[0];
 }

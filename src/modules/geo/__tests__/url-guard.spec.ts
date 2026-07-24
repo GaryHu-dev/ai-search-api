@@ -52,9 +52,25 @@ describe('assertFetchableUrl', () => {
     ).rejects.toThrow(/disallowed/);
   });
 
-  it('allows private hosts when allowPrivate is set (dev/test)', async () => {
+  it('allows private hosts when allowPrivate is set (dev/test), pinning nothing', async () => {
+    // allowPrivate skips resolution, so there is no validated IP to pin.
     await expect(
       assertFetchableUrl('http://127.0.0.1:8080/', true),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
+  });
+
+  it('returns the validated IP + family for a public literal host (for pinning)', async () => {
+    await expect(assertFetchableUrl('http://8.8.8.8/', false)).resolves.toEqual(
+      {
+        address: '8.8.8.8',
+        family: 4,
+      },
+    );
+  });
+
+  it('returns the validated IPv6 + family for a public literal host', async () => {
+    await expect(
+      assertFetchableUrl('http://[2001:4860:4860::8888]/', false),
+    ).resolves.toEqual({ address: '2001:4860:4860::8888', family: 6 });
   });
 });

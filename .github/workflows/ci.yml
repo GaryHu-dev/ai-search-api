@@ -91,8 +91,16 @@ jobs:
           docker run --rm --network host minio/mc alias set m http://localhost:9000 minioadmin minioadmin
           docker run --rm --network host minio/mc mb --ignore-existing m/app-files
 
+      - name: Migrate
+        run: pnpm prisma migrate deploy
+
+      - name: Migration drift check (schema.prisma vs migration history)
+        run: |
+          pnpm prisma migrate diff --exit-code \
+            --from-url "$DATABASE_URL" --to-schema-datamodel ./prisma/schema.prisma
+
       - name: Test
-        run: pnpm prisma migrate deploy && pnpm test && pnpm test:e2e
+        run: pnpm test:cov && pnpm test:e2e
 
   # Deploy only runs after `verify` passes, and only on a push to main. On PRs
   # and dev pushes it is skipped. This gates CD on CI at the workflow level, on
@@ -188,19 +196,44 @@ jobs:
             GOOGLE_POST_LOGIN_REDIRECT=https://omniport.online/auth/callback
             EOF
             fi
-            # Roll out and WAIT for container healthchecks. On failure, roll back
-            # to the previous image so a bad build can't take the site down.
-            if docker compose up -d --wait --wait-timeout 120; then
-              echo "deploy healthy"
-              docker image prune -f
-            else
-              echo "health check failed - rolling back to previous image"
+            # Shared rollback: retag the previously-running image back to
+            # `latest`, bring the stack back up on it, and fail the job.
+            rollback() {
+              echo "$1 - rolling back to previous image"
               if docker image inspect omniport-api:previous >/dev/null 2>&1; then
                 docker tag omniport-api:previous omniport-api:latest
                 docker compose up -d --wait --wait-timeout 120 || true
               fi
               exit 1
+            }
+
+            # Roll out and WAIT for the container healthcheck. That healthcheck
+            # only hits /health/live (liveness: process is up), so it can't
+            # catch a DB/queue outage. On failure, roll back immediately.
+            if ! docker compose up -d --wait --wait-timeout 120; then
+              rollback "container health check failed"
             fi
+
+            # Liveness passing doesn't mean the instance can serve traffic, so
+            # gate on /health/ready (DB + pg-boss) from inside the stack
+            # before pruning the previous image - a DB/queue-unhealthy rollout
+            # must roll back automatically, not just get caught later by the
+            # external smoke test after the rollback image is already gone.
+            ready=0
+            for i in $(seq 1 24); do
+              if docker compose exec -T api node -e "require('http').get('http://localhost:3000/health/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"; then
+                ready=1
+                break
+              fi
+              echo "waiting for readiness (db/jobs) ($i/24)"; sleep 5
+            done
+
+            if [ "$ready" -ne 1 ]; then
+              rollback "readiness check failed"
+            fi
+
+            echo "deploy healthy"
+            docker image prune -f
 
       - name: Smoke test (public HTTPS health)
         run: |

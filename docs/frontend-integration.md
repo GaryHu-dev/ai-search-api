@@ -96,9 +96,25 @@ Rules:
   returns `401` and revokes the whole session (by design).
 - Logout: `POST /v1/auth/logout { refreshToken }`, then clear local state.
 
-Google sign-in: get an ID token on the client via Google Identity Services, then
-`POST /v1/auth/google { idToken }`. (Backend must have `GOOGLE_CLIENT_ID` set, or
-it returns 503.)
+Google sign-in is a **server-side redirect flow**, not a client-side ID-token
+exchange:
+
+1. Navigate the browser (full page nav, not XHR/fetch) to
+   `GET /v1/auth/google`. The backend redirects to Google's consent screen.
+2. Google redirects back to the backend's `GET /v1/auth/google/callback`,
+   which exchanges the code and 302s the browser to
+   `GOOGLE_POST_LOGIN_REDIRECT` with the token pair in the URL **fragment**:
+   `#accessToken=...&refreshToken=...&tokenType=Bearer&expiresIn=900`.
+3. On that redirect target page, read `window.location.hash`, parse the
+   token pair out of it, store it the same way as the password-login tokens,
+   then clear the fragment from the URL (e.g. `history.replaceState`) so the
+   tokens don't linger in browser history.
+4. On failure the callback instead redirects with `#error=google_auth_failed`
+   — check for that and show a login error instead of trying to parse tokens.
+
+(Registered only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`GOOGLE_CALLBACK_URL`, and `GOOGLE_POST_LOGIN_REDIRECT` are all set on the
+backend.)
 
 Rate limits to handle in the UI: credential routes allow ~10/min (429 on
 exceed); after 5 failed logins an account is locked ~15 min (429).
@@ -111,9 +127,16 @@ Auth (public):
 | --- | --- | --- | --- |
 | POST | `/v1/auth/register` | `{ email, password, displayName? }` | token pair (201) |
 | POST | `/v1/auth/login` | `{ email, password }` | token pair (200) |
-| POST | `/v1/auth/google` | `{ idToken }` | token pair (200) |
 | POST | `/v1/auth/refresh` | `{ refreshToken }` | new token pair (200) |
 | POST | `/v1/auth/logout` | `{ refreshToken }` | 204 |
+
+Google sign-in doesn't fit the table above — it's a browser redirect, not a
+JSON call:
+
+| Method | Path | Body | Returns |
+| --- | --- | --- | --- |
+| GET | `/v1/auth/google` | — (full page navigation) | 302 to Google |
+| GET | `/v1/auth/google/callback` | — | 302 to `GOOGLE_POST_LOGIN_REDIRECT` with tokens in the URL fragment (or `#error=...` on failure) |
 
 Account (auth required — `Bearer`):
 

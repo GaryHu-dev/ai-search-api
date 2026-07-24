@@ -89,6 +89,24 @@ describe('GEO audits (e2e)', () => {
     ).toBe(true);
   });
 
+  it('notifies the requester when an audit completes', async () => {
+    const created = await submit('https://example.com/');
+    const done = await poll(created.body.data.id, tokenA);
+    expect(done.status).toBe('COMPLETED');
+
+    const res = await request(server)
+      .get('/v1/notifications')
+      .set('Authorization', `Bearer ${tokenA}`);
+    expect(res.status).toBe(200);
+    const notif = res.body.data.items.find(
+      (n: { type: string; data: { auditId: string } | null }) =>
+        n.type === 'audit.completed' &&
+        n.data?.auditId === created.body.data.id,
+    );
+    expect(notif).toBeDefined();
+    expect(notif.title).toBe('Audit complete');
+  });
+
   it('marks an audit FAILED when the page cannot be fetched', async () => {
     const created = await submit(FAIL_URL);
     const done = await poll(created.body.data.id, tokenA);

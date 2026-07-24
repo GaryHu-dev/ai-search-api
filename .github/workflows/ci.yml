@@ -115,14 +115,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build image (layer cache)
+      # No remote GHA layer cache: exporting a type=gha cache needs a
+      # "docker-container" buildx driver, but the default "docker" driver here
+      # can't, which fails the build. The simple load -> save -> ship flow below
+      # is the proven, reliable path; caching can be re-added with an explicit
+      # buildx driver later if build time ever matters.
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: .
           load: true
           tags: omniport-api:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Save image to a tarball
         run: docker save omniport-api:latest | gzip > deploy/image.tar.gz

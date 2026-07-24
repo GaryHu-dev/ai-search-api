@@ -1,8 +1,11 @@
 # Architecture
 
-A business-agnostic SaaS foundation on NestJS. The foundation (`core/`,
-`integrations/`) knows nothing about the product domain; the product itself lives
-under `modules/` — today that's `geo`, the AI-search / GEO audit feature.
+Omniport is a multi-tenant platform on NestJS. The foundation — `core/`,
+`integrations/`, plus the base modules `auth`, `users`, `files`,
+`notifications` — is product-agnostic and knows nothing about any specific
+product domain. Product modules live under `modules/` too; today that's
+`geo`, the GEO site audit feature. Planned (roadmap, not yet built): SEO/GEO
+content generation and publishing to WordPress/Shopify.
 
 For the *why* behind these choices, see the [ADRs](adr/README.md).
 
@@ -10,7 +13,7 @@ For the *why* behind these choices, see the [ADRs](adr/README.md).
 
 ```
 HTTP → Guards → Interceptors → ValidationPipe → Controller → Service → Prisma → PostgreSQL
-                                                                   ↘ Integrations (Google, storage)
+                                                                   ↘ Integrations (storage)
 ```
 
 There is no repository layer — services use Prisma directly ([ADR-0001](adr/0001-prisma-no-repository.md)).
@@ -35,16 +38,22 @@ Every request carries an `x-request-id`; it appears in logs, both envelopes, and
 
 ```
 src/
-  modules/        Business features: auth, users, files, geo
+  modules/        Business features: auth, users, files, geo, notifications
   core/           Infrastructure
     bootstrap/    configure*(app) — composed by main.ts and reused by e2e
     common/       filters, interceptors, decorators, utils, pagination
     tenancy/      per-request tenant context (automatic isolation)
     audit/ config/ health/ jobs/ logger/ prisma/
-  integrations/   External-service adapters: google, storage (email later)
+  integrations/   External-service adapters: storage (email later)
   app.module.ts
   main.ts
 ```
+
+Google sign-in is not an `integrations/` adapter: it's Passport strategy code
+that lives with the rest of auth, at
+`modules/auth/strategies/google.strategy.ts` (guarded by
+`modules/auth/google-auth.guard.ts`), since the OAuth redirect dance is
+auth-specific rather than a generic external-service client.
 
 Business features live under `modules/`; cross-cutting infrastructure under
 `core/`; adapters to third-party services under `integrations/`
@@ -69,11 +78,11 @@ use the plain `PrismaService` for system/non-tenant work.
 | `users` | The caller's own account: read, update, soft-delete |
 | `files` | Upload / list (paginated) / download / delete, tenant-scoped |
 | `geo` | GEO audit: async homepage analysis of a user-supplied URL (SSRF-guarded fetch, deterministic checks) |
+| `notifications` | Per-user notifications: list (paginated, filterable to unread), unread count, mark one/all read — tenant- and user-scoped |
 | `core/health` | Liveness and readiness probes |
 | `core/jobs` | Background jobs (pg-boss); refresh-token cleanup |
 | `core/audit` | Append-only audit log |
 | `integrations/storage` | S3-compatible object storage (MinIO / R2) |
-| `integrations/google` | Google ID-token verification |
 
 ## Data & observability
 

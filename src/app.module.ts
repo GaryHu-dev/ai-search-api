@@ -13,6 +13,7 @@ import { AppLoggerModule } from './core/logger/logger.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { FilesModule } from './modules/files/files.module';
 import { GeoModule } from './modules/geo/geo.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { UsersModule } from './modules/users/users.module';
 import { PrismaModule } from './core/prisma/prisma.module';
 
@@ -34,6 +35,7 @@ import { PrismaModule } from './core/prisma/prisma.module';
     AuthModule,
     FilesModule,
     GeoModule,
+    NotificationsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

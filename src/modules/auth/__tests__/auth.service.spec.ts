@@ -178,6 +178,59 @@ describe('AuthService', () => {
 
       expect(tokens.issue).toHaveBeenCalledWith(user);
     });
+
+    it('rejects when the tenant itself is soft-deleted', async () => {
+      users.findByEmail.mockResolvedValue({
+        id: 'u1',
+        tenantId: 't1',
+        email: 'jane@example.com',
+        deletedAt: null,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      });
+      prisma.loginMethod.findUnique.mockResolvedValue({
+        passwordHash: 'hashed',
+      });
+      passwords.verify.mockResolvedValue(true);
+      prisma.tenant.findUnique.mockResolvedValue({
+        id: 't1',
+        deletedAt: new Date(),
+      });
+
+      await expect(
+        service.login({ email: 'jane@example.com', password: 'password123' }),
+      ).rejects.toThrow(/workspace is no longer active/);
+      expect(tokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('resets failedLoginAttempts and lockedUntil on a successful login', async () => {
+      const user = {
+        id: 'u1',
+        tenantId: 't1',
+        email: 'jane@example.com',
+        deletedAt: null,
+        failedLoginAttempts: 3,
+        lockedUntil: null,
+      };
+      users.findByEmail.mockResolvedValue(user);
+      prisma.loginMethod.findUnique.mockResolvedValue({
+        passwordHash: 'hashed',
+      });
+      passwords.verify.mockResolvedValue(true);
+      prisma.tenant.findUnique.mockResolvedValue({ id: 't1', deletedAt: null });
+      tokens.issue.mockResolvedValue({ accessToken: 'a' });
+
+      await service.login({
+        email: 'jane@example.com',
+        password: 'password123',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
+      expect(tokens.issue).toHaveBeenCalledWith(user);
+    });
   });
 
   describe('issueSessionForGoogleUser', () => {

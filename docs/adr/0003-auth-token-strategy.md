@@ -38,3 +38,16 @@ the current stack.
   stateless access path. Rejected.
 - **bcrypt-hashed refresh tokens**: unnecessary slow hashing for random,
   high-entropy secrets. Rejected in favour of SHA-256.
+
+## Update — Google flow superseded
+
+The "verify a Google ID token sent by the client" approach above was **not**
+what shipped. The implemented flow is the server-side authorization-code
+redirect this ADR set out to avoid: `GET /v1/auth/google` redirects the
+browser to Google, `GET /v1/auth/google/callback` exchanges the code via
+Passport (`passport-google-oauth20`) and 302s the browser back to
+`GOOGLE_POST_LOGIN_REDIRECT` with the token pair in the URL fragment. See
+`src/modules/auth/auth.controller.ts`, `src/modules/auth/strategies/google.strategy.ts`,
+and `src/modules/auth/google-auth.guard.ts`. This note corrects the record
+rather than rewriting the decision above — the API-first rationale was the
+original intent, but the redirect flow is what's actually running.

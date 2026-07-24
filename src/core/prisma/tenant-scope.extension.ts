@@ -5,7 +5,11 @@ import { TenantContext } from '../tenancy/tenant-context';
 // Models whose rows belong to a tenant. Add a model here when it gains a
 // `tenantId` — this single list is the only thing to remember, instead of a
 // `where` clause on every query.
-export const TENANT_MODELS = new Set<string>(['File', 'SiteAudit']);
+export const TENANT_MODELS = new Set<string>([
+  'File',
+  'SiteAudit',
+  'Notification',
+]);
 
 // Tenant-bearing models deliberately NOT auto-scoped: User and AuditLog are
 // reached only pre-auth (login by email), by the caller's own id from the JWT,
@@ -53,6 +57,12 @@ export function scopeArgs(operation: string, args: any, tenantId: string): any {
 
   if (WHERE_OPERATIONS.has(operation)) {
     scoped.where = { ...(scoped.where ?? {}), tenantId };
+    // Defense-in-depth: `where.tenantId` limits which rows are touched, but a
+    // mutating `data.tenantId` could still move a matched row to another tenant.
+    // Reject a mismatched explicit tenantId in the update payload, same as create.
+    if (operation === 'update' || operation === 'updateMany') {
+      assertTenantMatches(scoped.data, tenantId);
+    }
   } else if (operation === 'create') {
     assertTenantMatches(scoped.data, tenantId);
     scoped.data = { ...(scoped.data ?? {}), tenantId };
@@ -66,6 +76,8 @@ export function scopeArgs(operation: string, args: any, tenantId: string): any {
     scoped.where = { ...(scoped.where ?? {}), tenantId };
     assertTenantMatches(scoped.create, tenantId);
     scoped.create = { ...(scoped.create ?? {}), tenantId };
+    // The update branch of an upsert can also carry a cross-tenant tenantId.
+    assertTenantMatches(scoped.update, tenantId);
   }
 
   return scoped;

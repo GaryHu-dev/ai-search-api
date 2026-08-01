@@ -51,9 +51,9 @@ jobs:
     # CI is the authority — it does not rely on the local pre-commit hook, which
     # can be bypassed (--no-verify, missing hooks, web/API commits).
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -113,7 +113,7 @@ jobs:
       group: deploy-omniport
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No remote GHA layer cache: exporting a type=gha cache needs a
       # "docker-container" buildx driver, but the default "docker" driver here
@@ -121,7 +121,7 @@ jobs:
       # is the proven, reliable path; caching can be re-added with an explicit
       # buildx driver later if build time ever matters.
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -131,7 +131,7 @@ jobs:
         run: docker save omniport-api:latest | gzip > deploy/image.tar.gz
 
       - name: Copy image + config to server
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
